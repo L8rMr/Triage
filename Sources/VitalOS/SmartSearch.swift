@@ -499,6 +499,12 @@ final class SmartSearch: ObservableObject {
         selected = mathResult != nil ? -1 : 0
 
         let trimmed = text.trimmingCharacters(in: .whitespaces)
+        // A money conversion is the answer; files that merely contain "usd" are noise.
+        if mathCaption != nil {
+            recentsMode = false; total = 0; searching = false
+            publish([])
+            return
+        }
         if trimmed.isEmpty {
             recentsMode = true
             query.predicate = NSPredicate(fromMetadataQueryString: "kMDItemLastUsedDate >= $time.today(-3) && kMDItemContentTypeTree != \"com.apple.application-bundle\"")

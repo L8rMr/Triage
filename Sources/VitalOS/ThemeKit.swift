@@ -221,7 +221,7 @@ struct Themed: ViewModifier {
             .controlSize(store.density == "compact" ? .small : store.density == "touch" ? .large : .regular)
             .modifier(ThemeButtons(chrome: t.chrome))
             .background(ThemeBackdrop(theme: t).ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) { if store.usesCustomChrome { WindowChrome(theme: t).ignoresSafeArea(edges: .top) } }
+            .overlay(alignment: .top) { if store.usesCustomChrome { WindowChrome(theme: t).ignoresSafeArea(edges: .top) } }
             .overlay { if t.backdrop == .scanlines { Scanlines().ignoresSafeArea().allowsHitTesting(false) } }
             .modifier(Glow(color: store.glowOn ? t.glow : nil))
             .background(TrafficLights(hidden: store.usesCustomChrome))
@@ -276,7 +276,7 @@ private struct TrafficLights: NSViewRepresentable {
 }
 
 /// Lets an empty area drag the window, like a real title bar.
-private struct DragArea: NSViewRepresentable {
+struct DragArea: NSViewRepresentable {
     final class V: NSView { override var mouseDownCanMoveWindow: Bool { true } }
     func makeNSView(context: Context) -> NSView { V() }
     func updateNSView(_ v: NSView, context: Context) {}
@@ -300,8 +300,9 @@ struct WindowChrome: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var height: CGFloat {
-        switch theme.chrome { case .win95: 24; case .xp: 30; case .win11: 32; case .mac1bit: 20; case .gnome: 40; default: 30 }
+    private var height: CGFloat { Self.height(theme.chrome) }
+    static func height(_ c: ChromeStyle) -> CGFloat {
+        switch c { case .win95: 24; case .xp: 30; case .win11: 32; case .mac1bit: 20; case .gnome: 40; default: 30 }
     }
 
     @ViewBuilder private var bar: some View {
@@ -537,4 +538,35 @@ struct ThemedPanel: ViewModifier {
 
 extension View {
     func themedPanel() -> some View { modifier(ThemedPanel()) }
+}
+
+struct HideSidebarToggle: ViewModifier {
+    let hide: Bool
+    func body(content: Content) -> some View {
+        if hide { content.toolbar(removing: .sidebarToggle) } else { content }
+    }
+}
+
+/// Sidebar color for themes that have their own; Apple Pro keeps the system material.
+struct SidebarFill: View {
+    var body: some View {
+        if ThemeStore.shared.current.chrome == .apple { Color.clear } else {
+            Theme.sidebar.ignoresSafeArea().background(FlattenSidebarGlass())
+        }
+    }
+}
+
+/// The sidebar column sits on frosted glass that washes out solid colors. Themes with their own sidebar turn it off.
+private struct FlattenSidebarGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { let v = NSView(); DispatchQueue.main.async { flatten(from: v) }; return v }
+    func updateNSView(_ v: NSView, context: Context) { DispatchQueue.main.async { flatten(from: v) } }
+    private func flatten(from v: NSView) {
+        var s = v.superview
+        while let cur = s {
+            // the glass may wrap the sidebar (keep it visible, just make it plain) or sit behind it as a sibling (hide it)
+            if let ev = cur as? NSVisualEffectView { ev.state = .inactive; ev.material = .windowBackground; ev.blendingMode = .withinWindow; return }
+            for sub in cur.subviews where !(sub === v) { if let ev = sub as? NSVisualEffectView, ev.subviews.isEmpty { ev.isHidden = true; return } }
+            s = cur.superview
+        }
+    }
 }

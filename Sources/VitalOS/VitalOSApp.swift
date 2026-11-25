@@ -152,32 +152,27 @@ struct RootView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            Sidebar()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 228, max: 280)
-        } detail: {
-            ZStack(alignment: .bottom) {
-                Theme.bg.ignoresSafeArea()
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                TourOverlay()
-                    .animation(.spring(duration: 0.35), value: model.tourIndex)
-                    .animation(.spring(duration: 0.35), value: model.tourActive)
-                if let t = undo.toast {
-                    ToastView(toast: t, center: undo)
-                        .padding(.bottom, 20)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+        VStack(spacing: 0) {
+            WorkbenchHeader()
+            HStack(spacing: 0) {
+                WorkbenchRail()
+                ZStack(alignment: .bottom) {
+                    Theme.bg.ignoresSafeArea()
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    TourOverlay()
+                        .animation(.spring(duration: 0.35), value: model.tourIndex)
+                        .animation(.spring(duration: 0.35), value: model.tourActive)
+                    if let t = undo.toast {
+                        ToastView(toast: t, center: undo)
+                            .padding(.bottom, 20)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-            }
-            .animation(.spring(duration: 0.3), value: undo.toast?.id)
-            .overlay(alignment: .topTrailing) {
-                HStack(spacing: 8) {
-                    NavButtons()
-                    HelpButton()
-                }
-                .padding(.top, 12).padding(.trailing, 16)
+                .animation(.spring(duration: 0.3), value: undo.toast?.id)
             }
         }
+        .ignoresSafeArea(edges: .top)
         .sheet(isPresented: Binding(get: { !model.pendingTrash.isEmpty }, set: { if !$0 { model.pendingTrash = [] } })) {
             TrashReview().environmentObject(model)
         }
@@ -229,12 +224,12 @@ struct RootView: View {
 
     @ViewBuilder private var detail: some View {
         switch model.route ?? .home {
-        case .home: HomeView()
+        case .home: WorkbenchHome()
         case .search: SearchPage()
         case .heart: HeartView()
         case .apps: AppsView()
         case .hardware: HardwareView()
-        case .files, .place: BrowserView()
+        case .files, .place: FilesWorkspace()
         case .clean: CleanView()
         case .tidy: TidyView()
         case .utilities: UtilitiesView()

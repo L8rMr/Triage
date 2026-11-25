@@ -399,12 +399,8 @@ struct MenuPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Picker("", selection: Binding(get: { tab == "wifi" ? "net" : tab }, set: { tab = $0; customizing = false })) {
-                    Text("Vitals").tag("vitals")
-                    Text("Connectivity").tag("net")
-                    Text("Sound").tag("sound")
-                }
-                .pickerStyle(.segmented).labelsHidden()
+                ThemeSegments(selection: Binding(get: { customizing ? "" : (tab == "wifi" ? "net" : tab) }, set: { tab = $0; customizing = false }),
+                              options: [("vitals", "Vitals", "heart.fill"), ("net", "Connectivity", "wifi"), ("sound", "Sound", "speaker.wave.2.fill")])
                 Button { customizing.toggle() } label: {
                     Image(systemName: "slider.horizontal.3").frame(width: 26, height: 22)
                         .foregroundStyle(customizing ? Theme.accent : .secondary)

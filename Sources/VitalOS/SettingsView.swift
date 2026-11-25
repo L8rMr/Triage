@@ -148,8 +148,8 @@ private struct AppearancePage: View {
 
         Group_(title: "Look") {
             Row(title: "Mode", hint: store.current.scheme == nil ? "Follows your Mac, or pick one" : "This theme has its own look") {
-                Picker("", selection: $store.mode) { Text("Auto").tag("auto"); Text("Light").tag("light"); Text("Dark").tag("dark") }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 200).disabled(store.current.scheme != nil)
+                ThemeSegments(selection: $store.mode, options: [("auto", "Auto"), ("light", "Light"), ("dark", "Dark")])
+                    .frame(width: 220).disabled(store.current.scheme != nil).opacity(store.current.scheme != nil ? 0.5 : 1)
             }
             Row(title: "Accent color", hint: "The first one uses the theme's own color") {
                 HStack(spacing: 8) {
@@ -165,8 +165,7 @@ private struct AppearancePage: View {
                 }
             }
             Row(title: "Layout density", hint: "Touch makes every control larger") {
-                Picker("", selection: $store.density) { Text("Compact").tag("compact"); Text("Comfortable").tag("comfortable"); Text("Touch").tag("touch") }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                ThemeSegments(selection: $store.density, options: [("compact", "Compact"), ("comfortable", "Comfortable"), ("touch", "Touch")]).frame(width: 300)
             }
             Row(title: "Text size", hint: "\(Int(store.textScale * 100))%") {
                 Slider(value: $store.textScale, in: 0.85...1.3, step: 0.05).frame(width: 220)
@@ -261,8 +260,7 @@ private struct MenuBarPage: View {
         }
         Group_(title: "Panel") {
             Row(title: "Opens on") {
-                Picker("", selection: $tab) { Text("Vitals").tag("vitals"); Text("Connectivity").tag("net"); Text("Sound").tag("sound") }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 280)
+                ThemeSegments(selection: $tab, options: [("vitals", "Vitals"), ("net", "Connectivity"), ("sound", "Sound")]).frame(width: 320)
             }
         }
     }
@@ -277,12 +275,10 @@ private struct HeartPage: View {
         PageHeader(title: "Heart & Readings", subtitle: "How often VitalOS checks your Mac. Slower readings use less battery.")
         Group_(title: "Readings") {
             Row(title: "While a window is open", hint: "Every \(rate.formatted()) seconds") {
-                Picker("", selection: $rate) { Text("1 s").tag(1.0); Text("1.5 s").tag(1.5); Text("3 s").tag(3.0) }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                ThemeSegments(selection: $rate, options: [(1.0, "1 s"), (1.5, "1.5 s"), (3.0, "3 s")]).frame(width: 220)
             }
             Row(title: "In the background", hint: "Menu bar numbers update at this pace") {
-                Picker("", selection: $bgRate) { Text("5 s").tag(5.0); Text("15 s").tag(15.0); Text("60 s").tag(60.0) }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                ThemeSegments(selection: $bgRate, options: [(5.0, "5 s"), (15.0, "15 s"), (60.0, "60 s")]).frame(width: 220)
             }
             Row(title: "Still heart line", hint: "Same as Reduce motion in Appearance") { Toggle("", isOn: $store.reduceMotion).labelsHidden().toggleStyle(.switch) }
         }
