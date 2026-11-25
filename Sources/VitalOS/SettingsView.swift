@@ -57,7 +57,7 @@ struct SettingsView: View {
                 Spacer()
             }
             .padding(12)
-            .frame(width: 220)
+            .frame(width: 220.d)
             .background(Theme.sidebar)
 
             ScrollView {
@@ -68,7 +68,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 860, height: 620)
+        .frame(width: 860.d, height: 620.d)
     }
 
     @ViewBuilder private var page: some View {
@@ -149,7 +149,7 @@ private struct AppearancePage: View {
         Group_(title: "Look") {
             Row(title: "Mode", hint: store.current.scheme == nil ? "Follows your Mac, or pick one" : "This theme has its own look") {
                 ThemeSegments(selection: $store.mode, options: [("auto", "Auto"), ("light", "Light"), ("dark", "Dark")])
-                    .frame(width: 220).disabled(store.current.scheme != nil).opacity(store.current.scheme != nil ? 0.5 : 1)
+                    .frame(width: 220.d).disabled(store.current.scheme != nil).opacity(store.current.scheme != nil ? 0.5 : 1)
             }
             Row(title: "Accent color", hint: "The first one uses the theme's own color") {
                 HStack(spacing: 8) {
@@ -165,10 +165,10 @@ private struct AppearancePage: View {
                 }
             }
             Row(title: "Layout density", hint: "Touch makes every control larger") {
-                ThemeSegments(selection: $store.density, options: [("compact", "Compact"), ("comfortable", "Comfortable"), ("touch", "Touch")]).frame(width: 300)
+                ThemeSegments(selection: $store.density, options: [("compact", "Compact"), ("comfortable", "Comfortable"), ("touch", "Touch")]).frame(width: 300.d)
             }
             Row(title: "Text size", hint: "\(Int(store.textScale * 100))%") {
-                Slider(value: $store.textScale, in: 0.85...1.3, step: 0.05).frame(width: 220)
+                Slider(value: $store.textScale, in: 0.85...1.3, step: 0.05).frame(width: 220.d)
             }
         }
         Group_(title: "Effects") {
@@ -260,7 +260,7 @@ private struct MenuBarPage: View {
         }
         Group_(title: "Panel") {
             Row(title: "Opens on") {
-                ThemeSegments(selection: $tab, options: [("vitals", "Vitals"), ("net", "Connectivity"), ("sound", "Sound")]).frame(width: 320)
+                ThemeSegments(selection: $tab, options: [("vitals", "Vitals"), ("net", "Connectivity"), ("sound", "Sound")]).frame(width: 320.d)
             }
         }
     }
@@ -275,10 +275,10 @@ private struct HeartPage: View {
         PageHeader(title: "Heart & Readings", subtitle: "How often VitalOS checks your Mac. Slower readings use less battery.")
         Group_(title: "Readings") {
             Row(title: "While a window is open", hint: "Every \(rate.formatted()) seconds") {
-                ThemeSegments(selection: $rate, options: [(1.0, "1 s"), (1.5, "1.5 s"), (3.0, "3 s")]).frame(width: 220)
+                ThemeSegments(selection: $rate, options: [(1.0, "1 s"), (1.5, "1.5 s"), (3.0, "3 s")]).frame(width: 220.d)
             }
             Row(title: "In the background", hint: "Menu bar numbers update at this pace") {
-                ThemeSegments(selection: $bgRate, options: [(5.0, "5 s"), (15.0, "15 s"), (60.0, "60 s")]).frame(width: 220)
+                ThemeSegments(selection: $bgRate, options: [(5.0, "5 s"), (15.0, "15 s"), (60.0, "60 s")]).frame(width: 220.d)
             }
             Row(title: "Still heart line", hint: "Same as Reduce motion in Appearance") { Toggle("", isOn: $store.reduceMotion).labelsHidden().toggleStyle(.switch) }
         }
