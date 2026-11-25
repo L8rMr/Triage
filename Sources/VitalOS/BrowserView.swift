@@ -342,6 +342,12 @@ struct FileMenu: View {
     var body: some View {
         Button("Open") { urls.forEach { model.open($0, in: pane) } }
         Button("Peek") { model.peek = urls.first }
+        if urls.count == 1, let u = urls.first, ["pdf", "png", "jpg", "jpeg", "heic", "tiff"].contains(u.pathExtension.lowercased()) {
+            Button("Edit in PDF Editor") {
+                if u.pathExtension.lowercased() == "pdf" { PDFEditorModel.shared.open(u) } else { PDFEditorModel.shared.openImage(u) }
+                model.route = .tool(.pdf)
+            }
+        }
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(urls) }
         Button("Open in Terminal") {
             if let u = urls.first { FileOps.openTerminal(at: FS.isFolder(u) ? u : u.deletingLastPathComponent()) }
@@ -565,7 +571,21 @@ struct InspectorSlot: View {
     @ObservedObject var pane: Pane
     var body: some View {
         if let u = pane.selection.count == 1 ? pane.selection.first : nil {
-            FileInspector(url: u)
+            VStack(spacing: 0) {
+                if ["pdf", "png", "jpg", "jpeg", "heic", "tiff"].contains(u.pathExtension.lowercased()) {
+                    Button {
+                        if u.pathExtension.lowercased() == "pdf" { PDFEditorModel.shared.open(u) } else { PDFEditorModel.shared.openImage(u) }
+                        NotificationCenter.default.post(name: .vitalOSShowPDF, object: nil)
+                    } label: {
+                        Label("Edit in PDF Editor", systemImage: "doc.richtext").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .padding(.horizontal, 14).padding(.top, 12)
+                    .frame(width: 270)
+                    .background(.regularMaterial)
+                }
+                FileInspector(url: u)
+            }
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "sidebar.right").font(.ui(size: 26)).foregroundStyle(.tertiary)

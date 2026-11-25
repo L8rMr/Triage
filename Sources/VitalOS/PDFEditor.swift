@@ -89,12 +89,12 @@ final class PDFEditorModel: ObservableObject {
     @Published var url: URL?
     @Published var tool: PDFTool = .select {
         didSet {
-            if oldValue == .editText && tool != .editText { commitEditing() }
+            if oldValue != tool { commitEditing() }   // any tool change ends the edit, so nothing stays stuck "Editing"
             view?.editLayer.refresh()
             if tool == .editText { analyzeVisible() }
         }
     }
-    @Published var ribbon: RibbonTab = .edit
+    @Published var ribbon: RibbonTab = .edit { didSet { if oldValue != ribbon { commitEditing() } } }
     @Published var dirty = false
     @Published var status = ""
     @Published var selected: PDFAnnotation?
@@ -258,6 +258,7 @@ final class PDFEditorModel: ObservableObject {
 
     func pushUndo(_ f: @escaping () -> Void) { undo.append(f); dirty = true }
     func undoLast() {
+        if editing { cancelEditing(); return }      // undo while typing = throw away this edit
         guard let f = undo.popLast() else { NSSound.beep(); return }
         f(); view?.needsDisplay = true; view?.editLayer.needsDisplay = true
         status = "Undone"
@@ -504,6 +505,7 @@ final class PDFEditorModel: ObservableObject {
                 pushUndo { a.setContent(o.content); a.textRect = o.rect; a.look = o.look }
             }
         }
+        status = changed ? "Edit kept. ⌘S saves it to the file." : tool.hint
         format = nil
         fontMatches = []
         lookAvailable = false
@@ -1606,11 +1608,12 @@ struct PDFEditorView: View {
     private var ribbon: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Button { m.openPanel() } label: { Image(systemName: "folder") }.help("Open")
+                Button { m.commitEditing(); m.openPanel() } label: { Image(systemName: "folder") }.help("Open")
                 Button { m.save() } label: { Image(systemName: "square.and.arrow.down") }.help("Save (⌘S)")
                     .keyboardShortcut("s", modifiers: .command).disabled(m.doc == nil)
                 Button { m.undoLast() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo (⌘Z)")
-                    .keyboardShortcut("z", modifiers: .command).disabled(m.doc == nil || m.editing)
+                    .keyboardShortcut(m.editing ? nil : KeyboardShortcut("z", modifiers: .command))   // while typing, ⌘Z belongs to the text
+                    .disabled(m.doc == nil)
                 Divider().frame(height: 16)
                 ForEach(RibbonTab.allCases) { t in
                     Button { m.ribbon = t; if !t.tools.contains(m.tool) { m.tool = .select } } label: {
@@ -1662,7 +1665,7 @@ struct PDFEditorView: View {
     }
 
     private func action(_ title: String, _ symbol: String, _ f: @escaping () -> Void) -> some View {
-        Button(action: f) {
+        Button { m.commitEditing(); f() } label: {
             VStack(spacing: 2) {
                 Image(systemName: symbol).font(.ui(size: 13))
                 Text(title).font(.ui(size: 9)).lineLimit(1)

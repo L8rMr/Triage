@@ -193,7 +193,7 @@ struct WorkbenchRail: View {
         case (.place, .files), (.files, .files): return true
         case (.tidy, .clean): return true
         case (.tool(.pdf), .tool(.pdf)): return true
-        case (.tool, .utilities): return true
+        case (.tool(let x), .utilities): return x != .pdf
         case let (a, b): return a == b
         }
     }
