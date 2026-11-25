@@ -56,20 +56,31 @@ final class SystemMonitor: ObservableObject {
         PerfLog.shared.tick()
         if tickCount2 % 5 == 1, (UserDefaults.standard.string(forKey: "bar.items") ?? "").contains("wifi") { WiFiModel.shared.refresh() }
         if tickCount2 % 12 == 2, let bar = UserDefaults.standard.string(forKey: "bar.items"), bar.contains("headphones") || bar.contains("mouse") { BluetoothModel.shared.refresh() }
+        let wantApps = tickCount2 % 3 == 1 || apps.isEmpty
         queue.async { [weak self] in
             guard let self else { return }
             let s = self.stats.snapshot()
-            let a = self.sampler.sample()
+            // Reading every process is the expensive part: live on Apps/Heart, every third tick elsewhere.
+            let a: [AppUsage]? = (wantApps || SystemMonitor.liveApps) ? self.sampler.sample() : nil
             DispatchQueue.main.async { self.apply(s, a) }
         }
     }
 
-    private func apply(_ s: SystemSnapshot, _ a: [AppUsage]) {
+    /// Set by screens that show per-app numbers live (Apps, Heart).
+    static var liveApps = false
+
+    private func apply(_ s: SystemSnapshot, _ fresh: [AppUsage]?) {
         snap = s
         push(&cpuHistory, s.cpu)
         push(&memHistory, s.memFraction * 100)
         push(&netInHistory, s.netIn)
         push(&netOutHistory, s.netOut)
+        if let a = fresh { applyApps(a) }
+
+        finishReading(s, Cardiologist.read(s, apps: apps))
+    }
+
+    private func applyApps(_ a: [AppUsage]) {
         var seen = Set<String>()
         var next: [AppUsage] = []
         next.reserveCapacity(a.count)
@@ -82,8 +93,10 @@ final class SystemMonitor: ObservableObject {
             next.append(app)
         }
         apps = next
+        appHistory = appHistory.filter { seen.contains($0.key) }
+    }
 
-        let reading = Cardiologist.read(s, apps: next)
+    private func finishReading(_ s: SystemSnapshot, _ reading: HeartReading) {
         heart = reading
         bpm = bpmHistory.isEmpty ? reading.bpm : bpm * 0.6 + reading.bpm * 0.4   // ease, don't jump
         push(&bpmHistory, bpm)
@@ -100,7 +113,6 @@ final class SystemMonitor: ObservableObject {
             HealthLog.shared.add(HealthSample(t: Date(), bpm: bpm, cpu: s.cpu, mem: s.memFraction * 100,
                                               health: reading.health, top: topByCPU.first?.name))
         }
-        appHistory = appHistory.filter { seen.contains($0.key) }
     }
 
     private func push(_ arr: inout [Double], _ v: Double) {

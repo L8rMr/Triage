@@ -81,13 +81,13 @@ enum ToolID: String, CaseIterable, Identifiable, Hashable {
 
     var category: String {
         switch self {
-        case .clean, .tidy, .diskmap, .diskhealth, .duplicates, .forgotten: return "Storage"
-        case .clipboard, .pdf, .converter, .rename, .autopilot: return "Files & documents"
-        case .uninstaller, .startup, .network, .ports, .history, .wifi, .sound: return "Apps & system"
+        case .startup, .network, .ports, .history, .diskhealth: return "Fix a slow Mac"
+        case .clean, .tidy, .diskmap, .duplicates, .forgotten, .uninstaller: return "Make room"
+        case .clipboard, .pdf, .converter, .rename, .autopilot, .wifi, .sound: return "Everyday"
         }
     }
 
-    static let categories = ["Storage", "Files & documents", "Apps & system"]
+    static let categories = ["Fix a slow Mac", "Make room", "Everyday"]
 
     var route: Route {
         switch self {
@@ -134,7 +134,7 @@ struct UtilitiesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .bottom) {
-                    PageTitle(title: "Utilities", subtitle: "\(ToolID.allCases.count) tools that work with your files and your Mac's health. Star the ones you want in the sidebar.")
+                    PageTitle(title: "Tools", subtitle: "\(ToolID.allCases.count) tools, grouped by what you're trying to do. Right-click one to pin it or open it.")
                     Spacer()
                     FilterPill("Find a tool", text: $query)
                 }
@@ -174,7 +174,7 @@ struct UtilitiesView: View {
                         Image(systemName: isPinned ? "star.fill" : "star").foregroundStyle(isPinned ? Color.yellow : Color.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(isPinned ? "Remove from sidebar" : "Show in sidebar")
+                    .help(isPinned ? "Unpin from Home" : "Pin to Home")
                 }
                 Text(t.title).font(.ui(size: 14, weight: .semibold))
                 Text(t.blurb).font(.ui(size: 12)).foregroundStyle(.secondary)
@@ -188,6 +188,14 @@ struct UtilitiesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open \(t.title)") { model.route = t.route }
+            Button(isPinned ? "Unpin from Home" : "Pin to Home") {
+                var p = pinned
+                if isPinned { p.removeAll { $0 == t.rawValue } } else { p.append(t.rawValue) }
+                pinnedRaw = p.joined(separator: ",")
+            }
+        }
     }
 }
 

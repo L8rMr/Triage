@@ -57,6 +57,12 @@ struct AppsView: View {
     }
 
     var body: some View {
+        page
+            .onAppear { SystemMonitor.liveApps = true }
+            .onDisappear { SystemMonitor.liveApps = false }
+    }
+
+    @ViewBuilder private var page: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .bottom) {
                 PageTitle(title: "Apps",
@@ -400,7 +406,7 @@ struct MenuPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 ThemeSegments(selection: Binding(get: { customizing ? "" : (tab == "wifi" ? "net" : tab) }, set: { tab = $0; customizing = false }),
-                              options: [("vitals", "Vitals", "heart.fill"), ("net", "Connectivity", "wifi"), ("sound", "Sound", "speaker.wave.2.fill")])
+                              options: [("vitals", "Vitals", "heart.fill"), ("net", "Wi-Fi & Bluetooth", "wifi"), ("sound", "Sound", "speaker.wave.2.fill")], iconOnly: true)
                 Button { customizing.toggle() } label: {
                     Image(systemName: "slider.horizontal.3").frame(width: 26, height: 22)
                         .foregroundStyle(customizing ? Theme.accent : .secondary)

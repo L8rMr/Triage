@@ -7,11 +7,14 @@ import AppKit
 struct ThemeSegments<T: Hashable>: View {
     @Binding var selection: T
     let options: [(value: T, label: String, symbol: String?)]
+    /// Icons only; the label becomes the tooltip and the VoiceOver name.
+    var iconOnly = false
     @Namespace private var ns
 
-    init(selection: Binding<T>, options: [(T, String, String?)]) {
+    init(selection: Binding<T>, options: [(T, String, String?)], iconOnly: Bool = false) {
         _selection = selection
         self.options = options.map { (value: $0.0, label: $0.1, symbol: $0.2) }
+        self.iconOnly = iconOnly
     }
     init(selection: Binding<T>, options: [(T, String)]) {
         self.init(selection: selection, options: options.map { ($0.0, $0.1, nil) })
@@ -26,8 +29,8 @@ struct ThemeSegments<T: Hashable>: View {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { selection = o.value }
                 } label: {
                     HStack(spacing: 5) {
-                        if let s = o.symbol { Image(systemName: s).font(.system(size: 11, weight: .semibold)) }
-                        Text(o.label).font(.ui(size: 12, weight: on ? .semibold : .medium)).lineLimit(1)
+                        if let s = o.symbol { Image(systemName: s).font(.system(size: iconOnly ? 14 : 11, weight: .semibold)) }
+                        if !iconOnly || o.symbol == nil { Text(o.label).font(.ui(size: 12, weight: on ? .semibold : .medium)).lineLimit(1) }
                     }
                     .foregroundStyle(textColor(on, chrome))
                     .frame(maxWidth: .infinity, minHeight: 28)
@@ -36,6 +39,8 @@ struct ThemeSegments<T: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(o.label)
+                .accessibilityLabel(o.label)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -241,6 +246,7 @@ struct WorkbenchRail: View {
 struct WorkbenchHome: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var monitor: SystemMonitor
+    @AppStorage("utilities.pinned") private var pinnedTools = "clean,tidy,clipboard,pdf"
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
@@ -316,6 +322,21 @@ struct WorkbenchHome: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("JUMP TO").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                        ForEach(pinnedTools.split(separator: ",").compactMap { ToolID(rawValue: String($0)) }) { t in
+                            Button { model.route = t.route } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: t.symbol).foregroundStyle(Theme.accent).frame(width: 20)
+                                    Text(t.title).font(.ui(size: 13)).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 12).frame(height: 40).glass(10).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Open \(t.title)") { model.route = t.route }
+                                Button("Unpin from Home") { pinnedTools = pinnedTools.split(separator: ",").filter { $0 != t.rawValue }.joined(separator: ",") }
+                            }
+                        }
                         ForEach(Places.favorites + model.pinned, id: \.path) { u in
                             Button { model.route = .files; model.active.go(u) } label: {
                                 HStack(spacing: 10) {
@@ -607,5 +628,20 @@ struct ConnectServerSheet: View {
         }
         .padding(22)
         .frame(width: 460)
+    }
+}
+
+
+// MARK: - Apps: what's running, and what's installed
+
+struct AppsHub: View {
+    @AppStorage("apps.tab") private var tab = "running"
+    var body: some View {
+        VStack(spacing: 0) {
+            ThemeSegments(selection: $tab, options: [("running", "Running now", "bolt.fill"), ("installed", "Installed · uninstall", "trash")])
+                .frame(width: 380)
+                .padding(.top, 16)
+            if tab == "installed" { ToolID.uninstaller.page } else { AppsView() }
+        }
     }
 }

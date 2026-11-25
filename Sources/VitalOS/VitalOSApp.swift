@@ -227,7 +227,7 @@ struct RootView: View {
         case .home: WorkbenchHome()
         case .search: SearchPage()
         case .heart: HeartView()
-        case .apps: AppsView()
+        case .apps: AppsHub()
         case .hardware: HardwareView()
         case .files, .place: FilesWorkspace()
         case .clean: CleanView()

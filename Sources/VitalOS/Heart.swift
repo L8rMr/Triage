@@ -124,12 +124,19 @@ struct HeartView: View {
     @State private var detail: VitalID?
 
     var body: some View {
+        page
+            .onAppear { SystemMonitor.liveApps = true }
+            .onDisappear { SystemMonitor.liveApps = false }
+    }
+
+    @ViewBuilder private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 PageTitle(title: "Heart",
                           subtitle: "One heartbeat for your whole Mac: processor, memory, heat, disk and battery, read every 1.5 seconds.")
                 if let h = monitor.heart {
                     bedside(h)
+                    raising(h)
                     diagnosis(h)
                     SuggestionsCard(reading: h)
                     Text("Click a channel to see what's behind it.").font(.ui(size: 11)).foregroundStyle(.tertiary)
@@ -148,6 +155,47 @@ struct HeartView: View {
             .padding(.top, 8)
         }
         .vitalDetail($detail, monitor: monitor, model: model)
+    }
+
+    /// The apps (and swap) pushing the heart rate up, each with a one-click fix.
+    private func raising(_ h: HeartReading) -> some View {
+        let total = Double(max(monitor.snap.memTotal, 1))
+        let top = monitor.apps.filter { !$0.isSystem }
+            .sorted { ($0.cpu / 100 + Double($0.memory) / total) > ($1.cpu / 100 + Double($1.memory) / total) }
+            .prefix(3)
+        let swap = monitor.snap.swapUsed
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("WHAT'S RAISING IT").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
+            ForEach(Array(top)) { app in
+                HStack(spacing: 12) {
+                    Image(nsImage: Icons.icon(for: app)).resizable().frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(app.name).font(.ui(size: 14, weight: .semibold))
+                        Text("\(Fmt.pct(app.cpu)) processor · \(Fmt.bytes(app.memory)) memory · \(app.processes.count) process\(app.processes.count == 1 ? "" : "es")")
+                            .font(.ui(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Quit") { monitor.quit(app); UndoCenter.shared.show("Quit \(app.name) · \(Fmt.bytes(app.memory)) of memory back") }
+                }
+                .padding(12).glass(12)
+                .contextMenu {
+                    Button("Quit \(app.name)") { monitor.quit(app) }
+                    Button("Show in Apps") { model.route = .apps }
+                }
+            }
+            if swap > 2_000_000_000 {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 18)).foregroundStyle(Theme.heat).frame(width: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Swap is \(Fmt.bytes(swap))").font(.ui(size: 14, weight: .semibold))
+                        Text("Memory that spilled onto the disk. Only a restart clears it.").font(.ui(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Remind me tonight") { QuickFix.remindRestartTonight() }
+                }
+                .padding(12).glass(12)
+            }
+        }
     }
 
     private func bedside(_ h: HeartReading) -> some View {

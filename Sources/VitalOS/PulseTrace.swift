@@ -37,50 +37,170 @@ final class BeatClock {
     }
 }
 
+/// The sweeping heart trace. Each 3-second pass is drawn once; Core Animation moves the write head
+/// on the graphics chip, so the CPU does almost nothing between passes.
 struct PulseLine: View {
     var bpm: Double
     var color: Color
     var window: Double = 3.0          // seconds of trace shown across the width
-    @State private var clock = BeatClock()
-    @State private var onScreen = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !onScreen || ThemeStore.shared.reduceMotion)) { tl in
-            Canvas { ctx, size in
-                let now = tl.date.timeIntervalSinceReferenceDate
-                clock.update(now, bpm: bpm)
-                let w = max(size.width, 1)
-                let mid = size.height * 0.62
-                let amp = size.height * 0.58
-                // sweeping write head: left of it is this pass, right of it is the previous pass
-                let sweepStart = floor(now / window) * window
-                let head = (now - sweepStart) / window
-                let gap = 0.06
-                var fresh = Path(), old = Path()
-                var x: CGFloat = 0
-                var startedFresh = false, startedOld = false
-                while x <= w {
-                    let f = Double(x / w)
-                    if f <= head {
-                        let y = mid - CGFloat(clock.signal(at: sweepStart + f * window)) * amp
-                        if startedFresh { fresh.addLine(to: CGPoint(x: x, y: y)) } else { fresh.move(to: CGPoint(x: x, y: y)); startedFresh = true }
-                    } else if f > head + gap {
-                        let y = mid - CGFloat(clock.signal(at: sweepStart - window + f * window)) * amp
-                        if startedOld { old.addLine(to: CGPoint(x: x, y: y)) } else { old.move(to: CGPoint(x: x, y: y)); startedOld = true }
-                    }
-                    x += 1
-                }
-                let style = StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
-                ctx.stroke(old, with: .color(color.opacity(0.35)), style: style)
-                ctx.stroke(fresh, with: .color(color), style: style)
-                // glowing dot at the write head
-                let hx = CGFloat(head) * w
-                let hy = mid - CGFloat(clock.signal(at: now)) * amp
-                ctx.fill(Path(ellipseIn: CGRect(x: hx - 4, y: hy - 4, width: 8, height: 8)), with: .color(color.opacity(0.25)))
-                ctx.fill(Path(ellipseIn: CGRect(x: hx - 2, y: hy - 2, width: 4, height: 4)), with: .color(color))
-            }
+        PulseLayerView(bpm: bpm, color: NSColor(color), window: window, still: ThemeStore.shared.reduceMotion)
+    }
+}
+
+private struct PulseLayerView: NSViewRepresentable {
+    let bpm: Double, color: NSColor, window: Double, still: Bool
+    func makeNSView(context: Context) -> PulseNSView { PulseNSView() }
+    func updateNSView(_ v: PulseNSView, context: Context) { v.update(bpm: bpm, color: color, window: window, still: still) }
+}
+
+final class PulseNSView: NSView {
+    private var bpm = 60.0, span = 3.0, still = false
+    private var color: NSColor = .systemGreen
+    private let fresh = CAShapeLayer(), old = CAShapeLayer(), dot = CAShapeLayer(), halo = CAShapeLayer()
+    private let freshMask = CALayer(), oldMask = CALayer()
+    private var timer: Timer?
+    private var beatCarry: Double = 0.2        // seconds into the next pass when the next beat lands
+    private var lastBeatOffset: Double = -10   // last beat of the previous pass, in this pass's time
+    private var lastFresh: CGPath?
+    private var visible = true
+    private var token: NSObjectProtocol?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer = CALayer()
+        layer?.masksToBounds = true
+        for l in [old, fresh] {
+            l.fillColor = nil; l.lineWidth = 1.6; l.lineCap = .round; l.lineJoin = .round
+            layer?.addSublayer(l)
         }
-        .background(OnScreenReader(visible: $onScreen))
+        fresh.mask = freshMask; old.mask = oldMask
+        freshMask.backgroundColor = NSColor.black.cgColor; oldMask.backgroundColor = NSColor.black.cgColor
+        freshMask.anchorPoint = CGPoint(x: 0, y: 0); oldMask.anchorPoint = CGPoint(x: 1, y: 0)
+        halo.path = CGPath(ellipseIn: CGRect(x: -4, y: -4, width: 8, height: 8), transform: nil)
+        dot.path = CGPath(ellipseIn: CGRect(x: -2, y: -2, width: 4, height: 4), transform: nil)
+        layer?.addSublayer(halo); layer?.addSublayer(dot)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+
+    func update(bpm: Double, color: NSColor, window: Double, still: Bool) {
+        let restartNeeded = still != self.still || window != self.span
+        self.bpm = bpm; self.span = window; self.still = still
+        if color != self.color { self.color = color; applyColor() }
+        if restartNeeded { restart() }
+    }
+
+    private func applyColor() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        fresh.strokeColor = color.cgColor
+        old.strokeColor = color.withAlphaComponent(0.35).cgColor
+        dot.fillColor = color.cgColor
+        halo.fillColor = color.withAlphaComponent(0.25).cgColor
+        CATransaction.commit()
+    }
+
+    override func layout() { super.layout(); restart() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let token { NotificationCenter.default.removeObserver(token) }
+        token = nil
+        guard let w = window else { stop(); return }
+        token = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: w, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            let v = w.isVisible && w.occlusionState.contains(.visible)
+            if v != self.visible { self.visible = v; self.restart() }
+        }
+        visible = w.isVisible && w.occlusionState.contains(.visible)
+        applyColor()
+        restart()
+    }
+
+    deinit { timer?.invalidate(); if let token { NotificationCenter.default.removeObserver(token) } }
+
+    private func stop() {
+        timer?.invalidate(); timer = nil
+        [freshMask, oldMask, dot, halo].forEach { $0.removeAllAnimations() }
+    }
+
+    private func restart() {
+        stop()
+        guard bounds.width > 4, bounds.height > 4, window != nil else { return }
+        applyColor()
+        pass()
+        guard visible, !still else { return }
+        let t = Timer(timeInterval: span, repeats: true) { [weak self] _ in self?.pass() }
+        t.tolerance = 0.02
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    /// Lays down one pass of the trace and starts the sweep across it.
+    private func pass() {
+        let w = bounds.width, h = bounds.height
+        let rate = min(max(bpm, 35), 200)
+        let interval = 60 / rate
+        let amp = min(1.0, max(0.5, 0.55 + (rate - 70) / 130))   // taller spikes when strained
+        var beats: [Double] = [lastBeatOffset]
+        var t = beatCarry
+        while t < span { beats.append(t); t += interval }
+        beatCarry = t - span
+        lastBeatOffset = (beats.last ?? 0) - span
+
+        let mid = h * 0.62, scale = h * 0.58
+        func signal(_ time: Double) -> Double {
+            guard let b = beats.last(where: { $0 <= time }) else { return 0 }
+            let p = (time - b) / 0.6
+            guard p >= 0, p < 1 else { return 0 }
+            let keys: [(Double, Double)] = [(0, 0), (0.12, 0.10), (0.2, 0), (0.30, 0), (0.34, -0.12), (0.40, 1),
+                                            (0.46, -0.30), (0.52, 0), (0.70, 0.20), (0.85, 0), (1, 0)]
+            for i in 1..<keys.count where p <= keys[i].0 {
+                let a = keys[i - 1], c = keys[i]
+                return (a.1 + (c.1 - a.1) * (p - a.0) / (c.0 - a.0)) * amp
+            }
+            return 0
+        }
+        let path = CGMutablePath()
+        var points: [CGPoint] = []
+        var x: CGFloat = 0
+        while x <= w {
+            let y = mid - CGFloat(signal(Double(x / w) * span)) * scale
+            let pt = CGPoint(x: x, y: y)
+            if x == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+            points.append(pt)
+            x += 1.5
+        }
+
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        old.path = lastFresh ?? path
+        fresh.path = path
+        lastFresh = path
+        let gap = w * 0.06
+        freshMask.bounds = CGRect(x: 0, y: 0, width: still ? w : 0, height: h); freshMask.position = .zero
+        oldMask.bounds = CGRect(x: 0, y: 0, width: still ? 0 : max(w - gap, 0), height: h); oldMask.position = CGPoint(x: w, y: 0)
+        dot.isHidden = still; halo.isHidden = still
+        CATransaction.commit()
+        guard !still, visible else { return }
+
+        let reveal = CABasicAnimation(keyPath: "bounds.size.width")
+        reveal.fromValue = 0; reveal.toValue = w; reveal.duration = span
+        reveal.fillMode = .forwards; reveal.isRemovedOnCompletion = false
+        freshMask.add(reveal, forKey: "sweep")
+
+        let erase = CABasicAnimation(keyPath: "bounds.size.width")
+        erase.fromValue = max(w - gap, 0); erase.toValue = 0; erase.duration = span * Double(max(w - gap, 0) / w)
+        erase.fillMode = .forwards; erase.isRemovedOnCompletion = false
+        oldMask.add(erase, forKey: "sweep")
+
+        let move = CAKeyframeAnimation(keyPath: "position")
+        move.values = points.map { NSValue(point: $0) }
+        move.duration = span
+        move.calculationMode = .linear
+        move.fillMode = .forwards; move.isRemovedOnCompletion = false
+        dot.add(move, forKey: "sweep"); halo.add(move, forKey: "sweep")
     }
 }
 

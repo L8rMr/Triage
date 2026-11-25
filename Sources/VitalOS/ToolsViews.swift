@@ -80,6 +80,21 @@ struct CleanView: View {
     @State private var confirm: CleanTarget?
     @State private var working: String?
     @State private var sort = ColumnSort(key: "size", ascending: false)
+    /// nil until you touch a checkbox: then "everything safe" is the default pick.
+    @State private var checked: Set<String>?
+    @State private var confirmPicked = false
+
+    private var pickedIDs: Set<String> { checked ?? Set(targets.filter(\.safe).map(\.id)) }
+    private var picked: [CleanTarget] { targets.filter { pickedIDs.contains($0.id) && $0.id != "trash" && ($0.size ?? 0) > 0 } }
+    private var pickedBytes: Int64 { picked.compactMap(\.size).reduce(0, +) }
+    private func toggle(_ t: CleanTarget) {
+        var s = pickedIDs
+        if s.contains(t.id) { s.remove(t.id) } else { s.insert(t.id) }
+        checked = s
+    }
+    private func clearPicked() {
+        if picked.contains(where: { !$0.safe }) { confirmPicked = true } else { clearMany(picked); checked = nil }
+    }
     @State private var fName = ""
     @State private var fSizes: Set<String> = []
 
@@ -120,13 +135,13 @@ struct CleanView: View {
                     }
                     .frame(width: 120, height: 120)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(Fmt.bytes(reclaimable)) safe to clear right now")
+                        Text(targets.isEmpty || targets.contains { $0.size == nil } ? "Measuring…" : "\(Fmt.bytes(reclaimable)) comes back on its own")
                             .font(.ui(size: 22, weight: .semibold, design: .rounded))
-                        Text("Caches and build products your apps will quietly recreate.")
-                            .font(.ui(size: 13)).foregroundStyle(.secondary)
-                        Button("Clear all safe items") { clearAllSafe() }
-                            .buttonStyle(.borderedProminent).tint(Theme.accent.opacity(0.8))
-                            .disabled(reclaimable == 0 || working != nil)
+                        Text("Ticked items are safe: caches and build products your apps quietly recreate. Tick anything marked Your call to add it.")
+                            .font(.ui(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button(working ?? (pickedBytes > 0 ? "Clear \(Fmt.bytes(pickedBytes))" : "Nothing ticked")) { clearPicked() }
+                            .buttonStyle(.borderedProminent).tint(Theme.accent).controlSize(.large)
+                            .disabled(pickedBytes == 0 || working != nil)
                     }
                     Spacer()
                 }
@@ -144,13 +159,17 @@ struct CleanView: View {
                 if !fName.isEmpty || !fSizes.isEmpty {
                     Button("Clear filters") { fName = ""; fSizes = [] }.buttonStyle(.borderless).font(.ui(size: 11))
                 }
-                section("Safe to clear", arranged(targets.filter(\.safe)))
-                section("Your call", arranged(targets.filter { !$0.safe }))
+                section("\(targets.count) suggestions", arranged(targets))
             }
             .padding(28)
             .padding(.top, 8)
         }
         .task { await refresh() }
+        .confirmationDialog("Clear \(Fmt.bytes(pickedBytes))?", isPresented: $confirmPicked) {
+            Button("Move to Trash", role: .destructive) { clearMany(picked); checked = nil }
+        } message: {
+            Text("Includes items marked Your call: " + picked.filter { !$0.safe }.map(\.title).joined(separator: ", ") + ". You can Undo right after.")
+        }
         .confirmationDialog(confirm.map { "Clear \($0.title)?" } ?? "",
                             isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.id == "trash" ? "Empty Trash" : "Move to Trash", role: .destructive) {
@@ -167,13 +186,26 @@ struct CleanView: View {
             Text(title.uppercased()).font(.ui(size: 10, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
             ForEach(items) { t in
                 HStack(spacing: 14) {
-                    Image(systemName: t.symbol).font(.ui(size: 16)).foregroundStyle(t.safe ? Theme.accent : Theme.net)
-                        .frame(width: 26)
+                    if t.id == "trash" {
+                        Image(systemName: t.symbol).font(.ui(size: 16)).foregroundStyle(Theme.net).frame(width: 26)
+                    } else {
+                        Button { toggle(t) } label: {
+                            Image(systemName: pickedIDs.contains(t.id) ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 18)).foregroundStyle(pickedIDs.contains(t.id) ? Theme.accent : Color.secondary)
+                                .frame(width: 26)
+                        }
+                        .buttonStyle(.plain).help(pickedIDs.contains(t.id) ? "Untick to keep" : "Tick to clear")
+                    }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(t.title).font(.ui(size: 13, weight: .semibold))
                         Text(t.detail).font(.ui(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Text(t.safe ? "Comes back on its own" : "Your call")
+                        .font(.ui(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background((t.safe ? Theme.good : Theme.heat).opacity(0.15), in: Capsule())
+                        .foregroundStyle(t.safe ? Theme.good : Theme.heat)
                     if let s = t.size {
                         Text(t.id == "trash" && t.count == 0 ? "—" : Fmt.bytes(s))
                             .font(.ui(size: 13, weight: .medium)).monospacedDigit()
@@ -182,11 +214,9 @@ struct CleanView: View {
                     } else {
                         ProgressView().controlSize(.small)
                     }
-                    Button(t.id == "trash" ? "Empty" : "Clear") {
-                        if t.safe { clear(t) } else { confirm = t }
+                    if t.id == "trash" {
+                        Button("Empty") { confirm = t }.disabled(working != nil || t.count == 0).frame(width: 64)
                     }
-                    .disabled(working != nil || (t.id != "trash" && (t.size ?? 0) == 0))
-                    .frame(width: 64)
                     if t.id != "trash", case .contents(let u) = t.source {
                         Button { NSWorkspace.shared.activateFileViewerSelecting([u]) } label: { Image(systemName: "arrow.up.forward.square") }
                             .buttonStyle(.borderless).help("Show in Finder")
