@@ -358,10 +358,12 @@ final class PDFEditorModel: ObservableObject {
         guard !todo.isEmpty else { return }
         Work.heavy.addOperation {
             var done = 0
+            var copies: [(TextBlock, TextBlock, TextBlock)] = []   // original, first match, untouched inputs
             for b in todo {
                 guard let page = b.page else { continue }
                 // work on a copy, then hand the results over on the main thread
                 let c = TextBlock(page: page, lines: b.lines, textRect: b.textRect, content: b.content, isScan: true)
+                let raw = TextBlock(page: page, lines: b.lines, textRect: b.textRect, content: b.content, isScan: true)
                 PageAnalyzer.match(c, raster: raster)
                 var area = c.lines.reduce(c.lines.first ?? c.textRect) { $0.union($1) }
                 let h = c.lines.first?.height ?? 10
@@ -377,6 +379,25 @@ final class PDFEditorModel: ObservableObject {
                     if self.tool == .editText && self.session == nil {
                         self.status = n == todo.count ? "Ready: every line on this page is matched. Click any line to edit it." : "Matching fonts… \(n) of \(todo.count)"
                     }
+                    self.view?.editLayer.needsDisplay = true
+                }
+                copies.append((b, c, raw))
+            }
+            // second pass: the page's main typeface wins close calls, so a date doesn't come back in a stranger font
+            var votes: [String: Double] = [:]
+            for (_, c, _) in copies {
+                let weight = Double(min(40, c.content.string.filter { $0.isLetter }.count))
+                for m in c.matches.prefix(3) { votes[m.fontName, default: 0] += m.score * weight }
+            }
+            guard let house = votes.max(by: { $0.value < $1.value })?.key else { return }
+            for (b, c, raw) in copies where c.matches.first?.fontName != house {
+                let d = raw
+                PageAnalyzer.match(d, raster: raster, prefer: house)
+                guard d.matches.first?.fontName == house else { continue }
+                DispatchQueue.main.async {
+                    guard b.annotation == nil else { return }
+                    b.lines = d.lines; b.textRect = d.textRect; b.content = d.content
+                    b.matches = d.matches; b.look = d.look; b.sample = d.sample
                     self.view?.editLayer.needsDisplay = true
                 }
             }

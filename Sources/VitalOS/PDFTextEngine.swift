@@ -709,7 +709,7 @@ enum PageAnalyzer {
     }
 
     /// Matches font, size, color and the scanner's softness for a scanned paragraph, and positions text on the original baselines.
-    static func match(_ b: TextBlock, raster: PageRaster) {
+    static func match(_ b: TextBlock, raster: PageRaster, prefer: String? = nil) {
         guard b.isScan else { matchVector(b); return }
         b.lines = b.lines.map { FontMatcher.inkRun(raster, around: $0) }
         refineText(b, raster: raster)
@@ -728,7 +728,15 @@ enum PageAnalyzer {
         // combine scores across sampled lines
         var total: [String: Double] = [:]
         for (r, _) in results { for m in r.matches { total[m.fontName, default: 0] += m.score } }
-        let ranked = total.sorted { $0.value > $1.value }.map { FontMatch(fontName: $0.key, score: $0.value / Double(results.count)) }
+        var ranked = total.sorted { $0.value > $1.value }.map { FontMatch(fontName: $0.key, score: $0.value / Double(results.count)) }
+        // a page is set in one or two typefaces: if the page's main font is nearly as good a fit, use it
+        // (short lines like dates and codes give the matcher too little to go on and pick oddballs)
+        let letters = b.content.string.filter { $0.isLetter }.count
+        let slack = letters < 6 ? 0.3 : 0.12          // digits and codes say little about the typeface
+        if let prefer, let top = ranked.first, top.fontName != prefer,
+           let i = ranked.firstIndex(where: { $0.fontName == prefer }), ranked[i].score >= top.score - slack {
+            let m = ranked.remove(at: i); ranked.insert(FontMatch(fontName: m.fontName, score: max(m.score, top.score)), at: 0)
+        }
         b.matches = Array(ranked.prefix(8))
         let fontName = ranked.first?.fontName ?? "Helvetica"
         // size: from letter height (cap height for caps/digits, x-height for lowercase), cross-checked with width
