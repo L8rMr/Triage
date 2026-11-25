@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>VitalOS</string>
+    <key>CFBundleDisplayName</key><string>VitalOS</string>
+    <key>CFBundleIdentifier</key><string>com.alenlvovich.vitalos</string>
+    <key>CFBundleExecutable</key><string>VitalOS</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSDesktopFolderUsageDescription</key><string>VitalOS shows your Desktop in its file browser and recent files.</string>
+    <key>NSDocumentsFolderUsageDescription</key><string>VitalOS shows your Documents in its file browser and recent files.</string>
+    <key>NSDownloadsFolderUsageDescription</key><string>VitalOS shows and tidies your Downloads folder.</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>PDF Document</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+        </dict>
+    </array>
+    <key>NSLocationWhenInUseUsageDescription</key><string>macOS only reveals Wi-Fi network names to apps with Location access. VitalOS uses it to show and switch networks, never to track where you are.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key><string>VitalOS shows your Bluetooth devices, lets you connect them in one click, and shows their battery levels.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>VitalOS sets each app's volume by routing its sound through a private mixer. Nothing is recorded or saved.</string>
+    <key>NSAppleEventsUsageDescription</key><string>VitalOS asks Finder to empty the Trash when you tell it to.</string>
+</dict>
+</plist>
