@@ -186,7 +186,8 @@ struct RootView: View {
             PermissionsView(firstRun: !UserDefaults.standard.bool(forKey: "perm.onboarded"))
         }
         .task {
-            if !UserDefaults.standard.bool(forKey: "perm.onboarded") {
+            // first launch, or setup gained new permissions since you last ran it
+            if !UserDefaults.standard.bool(forKey: "perm.onboarded") || (UserDefaults.standard.integer(forKey: "perm.version") < 2 && !Permissions.shared.allGood) {
                 try? await Task.sleep(nanoseconds: 600_000_000)
                 model.showPermissions = true
             } else if !UserDefaults.standard.bool(forKey: "tour.seen") {

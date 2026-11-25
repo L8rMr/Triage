@@ -39,8 +39,10 @@ enum AppBundler {
             NSLog("VitalOS bundling failed: \(error)")
             return false
         }
-        // Stable signature identifier so macOS recognises it as the same app between builds.
-        Shell.run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--identifier", "com.alenlvovich.vitalos", app.path], timeout: 30)
+        // A real certificate keeps permissions between builds; ad-hoc ("-") makes macOS forget them every time.
+        let identity = pickSigningIdentity()
+        UserDefaults.standard.set(identity, forKey: "signing.identity")
+        Shell.run("/usr/bin/codesign", ["--force", "--deep", "--sign", identity, "--identifier", "com.alenlvovich.vitalos", app.path], timeout: 30)
         if let img = NSImage(contentsOf: iconPNG) { NSWorkspace.shared.setIcon(img, forFile: app.path, options: []) }
 
         // Quit any older copy that's still running, then open the fresh one.
@@ -65,4 +67,18 @@ enum AppBundler {
         _ = done.wait(timeout: .now() + 10)
         return ok
     }
+
+    /// What this copy was signed with: a certificate name, or "-" for ad-hoc.
+    static var signingIdentity: String { UserDefaults.standard.string(forKey: "signing.identity") ?? "-" }
+
+    /// First Apple Development / Developer ID certificate in the keychain, else ad-hoc.
+    static func pickSigningIdentity() -> String {
+        let out = Shell.run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"], timeout: 10)
+        let names: [String] = out.split(separator: "\n").compactMap { line in
+            guard let a = line.firstIndex(of: "\""), let b = line.lastIndex(of: "\""), a < b else { return nil }
+            return String(line[line.index(after: a)..<b])
+        }
+        return names.first { $0.hasPrefix("Apple Development") } ?? names.first { $0.hasPrefix("Developer ID Application") } ?? names.first ?? "-"
+    }
+
 }

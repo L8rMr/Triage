@@ -165,6 +165,8 @@ final class ThemeStore: ObservableObject {
     }
 
     var current: AppTheme { AppTheme.all.first { $0.id == themeID } ?? AppTheme.all[0] }
+    /// Compact shrinks type and targets, Touch grows them (easy to hit on a touch screen or from the couch).
+    var densityScale: CGFloat { density == "compact" ? 0.88 : density == "touch" ? 1.22 : 1 }
     var accent: Color { Color(hexString: accentHex) ?? current.accent }
     var scheme: ColorScheme? {
         if let s = current.scheme { return s }
@@ -196,7 +198,7 @@ extension Font {
     /// Theme-aware replacement for `.system(size:weight:design:)`.
     static func ui(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
         let store = ThemeStore.shared, t = store.current
-        let s = size * t.fontScale * CGFloat(store.textScale)
+        let s = size * t.fontScale * CGFloat(store.textScale) * store.densityScale
         if design == .monospaced, let m = t.mono { return .custom(m, size: s).weight(weight) }
         if let f = t.font {
             let heavy: [Font.Weight] = [.semibold, .bold, .heavy, .black]
@@ -570,3 +572,11 @@ private struct FlattenSidebarGlass: NSViewRepresentable {
         }
     }
 }
+
+
+extension CGFloat {
+    /// A size scaled by the Layout density setting.
+    var d: CGFloat { self * ThemeStore.shared.densityScale }
+}
+extension Int { var d: CGFloat { CGFloat(self).d } }
+extension Double { var d: CGFloat { CGFloat(self).d } }

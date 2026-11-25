@@ -27,6 +27,8 @@ enum Theme {
 
 extension View {
     func glass(_ radius: CGFloat = 16) -> some View { modifier(ThemedCard(radius: radius)) }
+    /// Padding that follows the Layout density setting.
+    func dpad(_ v: CGFloat) -> some View { padding(v.d) }
 }
 
 enum Fmt {

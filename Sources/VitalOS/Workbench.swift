@@ -33,7 +33,7 @@ struct ThemeSegments<T: Hashable>: View {
                         if !iconOnly || o.symbol == nil { Text(o.label).font(.ui(size: 12, weight: on ? .semibold : .medium)).lineLimit(1) }
                     }
                     .foregroundStyle(textColor(on, chrome))
-                    .frame(maxWidth: .infinity, minHeight: 28)
+                    .frame(maxWidth: .infinity, minHeight: 28.d)
                     .padding(.horizontal, 6)
                     .background { segmentBackground(on, chrome) }
                     .contentShape(Rectangle())
@@ -140,7 +140,7 @@ struct WorkbenchHeader: View {
                 NavButtons()
                 InlineSearchField(engine: model.search, placeholder: "Search files, or type what you want: \u{201C}free up space\u{201D}, \u{201C}100 usd to eur\u{201D}",
                                   size: 14, focusToken: model.searchFocus) { model.route = .search }
-                    .padding(.horizontal, 12).frame(height: 36).frame(maxWidth: 620)
+                    .padding(.horizontal, 12).frame(height: 36.d).frame(maxWidth: 620)
                     .background(Theme.panel, in: RoundedRectangle(cornerRadius: min(10, store.current.radius + 4), style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: min(10, store.current.radius + 4), style: .continuous).stroke(Theme.stroke))
                 Spacer(minLength: 8)
@@ -161,7 +161,7 @@ struct WorkbenchHeader: View {
             .padding(.leading, store.usesCustomChrome ? 14 : 84)
             .padding(.trailing, 16)
         }
-        .frame(height: 52)
+        .frame(height: 52.d)
         .padding(.top, store.usesCustomChrome ? WindowChrome.height(store.current.chrome) : 0)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.stroke).frame(height: 1) }
     }
@@ -207,7 +207,7 @@ struct WorkbenchRail: View {
                         Image(systemName: item.symbol).font(.system(size: 18))
                         Text(item.label).font(.ui(size: 10, weight: .medium))
                     }
-                    .frame(width: 64, height: 56)
+                    .frame(width: 64.d, height: 56.d)
                     .foregroundStyle(on ? Theme.selectionText : Color.secondary)
                     .background(on ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: min(14, ThemeStore.shared.current.radius + 4), style: .continuous))
                     .overlay(alignment: .topTrailing) { badge(item) }
@@ -227,7 +227,7 @@ struct WorkbenchRail: View {
             .buttonStyle(.plain).help("Settings (⌘,)")
         }
         .padding(.vertical, 12)
-        .frame(width: 84)
+        .frame(width: 84.d)
         .background(SidebarFill())
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1) }
     }
@@ -307,7 +307,7 @@ struct WorkbenchHome: View {
                                         Button(label) { run(t.action) }.controlSize(.large)
                                     }
                                 }
-                                .padding(12)
+                                .padding(12.d)
                                 .glass(14)
                                 .contextMenu {
                                     if let label = t.actionLabel { Button(label) { run(t.action) } }
@@ -329,7 +329,7 @@ struct WorkbenchHome: View {
                                     Text(t.title).font(.ui(size: 13)).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 12).frame(height: 40).glass(10).contentShape(Rectangle())
+                                .padding(.horizontal, 12).frame(height: 40.d).glass(10).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
@@ -344,7 +344,7 @@ struct WorkbenchHome: View {
                                     Text(Places.name(u)).font(.ui(size: 13)).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 12).frame(height: 40).glass(10).contentShape(Rectangle())
+                                .padding(.horizontal, 12).frame(height: 40.d).glass(10).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
@@ -356,7 +356,7 @@ struct WorkbenchHome: View {
                     }
                 }
             }
-            .padding(28)
+            .padding(28.d)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -381,7 +381,7 @@ struct WorkbenchHome: View {
                 Text(cta + " →").font(.ui(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
             }
             .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 170.d, alignment: .topLeading)
             .glass(18)
             .contentShape(Rectangle())
         }
@@ -453,7 +453,7 @@ final class Locations: ObservableObject {
 struct FilesWorkspace: View {
     var body: some View {
         HStack(spacing: 0) {
-            LocationsSidebar().frame(width: 232)
+            LocationsSidebar().frame(width: 232.d)
             Rectangle().fill(Theme.stroke).frame(width: 1)
             BrowserView()
         }
@@ -567,7 +567,7 @@ struct LocationsSidebar: View {
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("Eject")
             }
         }
-        .padding(.horizontal, 10).frame(height: 32)
+        .padding(.horizontal, 10).frame(height: 32.d)
         .background(on ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: min(8, ThemeStore.shared.current.radius), style: .continuous))
         .contentShape(Rectangle())
     }

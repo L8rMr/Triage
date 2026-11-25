@@ -20,6 +20,7 @@ let package = Package(
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("IOBluetooth"),
+                .linkedFramework("CoreBluetooth"),
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("ServiceManagement"),
                 // Embed Info.plist so macOS can show permission prompts (Location, Audio) even when run from Xcode.

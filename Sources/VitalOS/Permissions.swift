@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreBluetooth
 import AppKit
 import CoreLocation
 import CoreAudio
@@ -8,13 +9,14 @@ import ApplicationServices
 
 /// Every macOS permission VitalOS uses, what it unlocks, and how to grant it.
 enum Perm: String, CaseIterable, Identifiable {
-    case files, location, audio, screen, accessibility, notifications, fullDisk
+    case files, location, bluetooth, audio, screen, accessibility, notifications, fullDisk
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .files: return "Desktop, Documents & Downloads"
         case .location: return "Location"
+        case .bluetooth: return "Bluetooth"
         case .audio: return "System Audio"
         case .screen: return "Screen Recording"
         case .accessibility: return "Accessibility"
@@ -26,6 +28,7 @@ enum Perm: String, CaseIterable, Identifiable {
         switch self {
         case .files: return "folder"
         case .location: return "wifi"
+        case .bluetooth: return "wave.3.right"
         case .audio: return "slider.vertical.3"
         case .screen: return "text.viewfinder"
         case .accessibility: return "doc.on.clipboard"
@@ -37,6 +40,7 @@ enum Perm: String, CaseIterable, Identifiable {
         switch self {
         case .files: return "Browse, tidy and clean your everyday folders."
         case .location: return "macOS only shares Wi-Fi network names with apps that have it. Never used to track you."
+        case .bluetooth: return "Lists your Bluetooth devices with their battery levels, and connects them in one click."
         case .audio: return "Sets each app's own volume in the Sound Mixer. Nothing is recorded."
         case .screen: return "Copy text from anywhere on screen (⌘⇧2)."
         case .accessibility: return "Paste straight from the clipboard panel (⌥⇧V) into the app you're in."
@@ -53,6 +57,7 @@ enum Perm: String, CaseIterable, Identifiable {
         switch self {
         case .files: pane = "Privacy_FilesAndFolders"
         case .location: pane = "Privacy_LocationServices"
+        case .bluetooth: pane = "Privacy_Bluetooth"
         case .audio: pane = "Privacy_AudioCapture"
         case .screen: pane = "Privacy_ScreenCapture"
         case .accessibility: pane = "Privacy_Accessibility"
@@ -83,8 +88,14 @@ final class Permissions: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func refresh() {
         var s: [Perm: PermState] = [:]
-        // Folders: reading the directory is the check (and the prompt).
-        s[.files] = UserDefaults.standard.bool(forKey: "perm.files.asked") ? (canRead("Desktop") && canRead("Documents") && canRead("Downloads") ? .granted : .denied) : .unknown
+        // Folders: reading a folder can pop a macOS prompt, so the quiet check reuses the last real answer.
+        let d = UserDefaults.standard
+        s[.files] = d.object(forKey: "perm.files.ok") == nil ? .unknown : (d.bool(forKey: "perm.files.ok") ? .granted : .denied)
+        switch CBManager.authorization {
+        case .allowedAlways: s[.bluetooth] = .granted
+        case .denied, .restricted: s[.bluetooth] = .denied
+        default: s[.bluetooth] = .unknown
+        }
         switch location.authorizationStatus {
         case .authorizedAlways, .authorized: s[.location] = .granted
         case .denied, .restricted: s[.location] = .denied
@@ -101,6 +112,16 @@ final class Permissions: NSObject, ObservableObject, CLLocationManagerDelegate {
             DispatchQueue.main.async { self.state[.notifications] = v }
         }
     }
+
+    /// Reads the folders for real (only after the user asks, or presses Check again).
+    func checkFoldersNow() {
+        guard UserDefaults.standard.bool(forKey: "perm.files.asked") else { return }
+        let ok = canRead("Desktop") && canRead("Documents") && canRead("Downloads")
+        UserDefaults.standard.set(ok, forKey: "perm.files.ok")
+        refresh()
+    }
+
+    private var btProbe: CBCentralManager?
 
     private func canRead(_ name: String) -> Bool {
         let u = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(name)
@@ -125,10 +146,19 @@ final class Permissions: NSObject, ObservableObject, CLLocationManagerDelegate {
         switch p {
         case .files:
             UserDefaults.standard.set(true, forKey: "perm.files.asked")
+            var ok = true
             for n in ["Desktop", "Documents", "Downloads"] {
-                _ = canRead(n)
+                ok = canRead(n) && ok
                 try? await Task.sleep(nanoseconds: 300_000_000)
             }
+            UserDefaults.standard.set(ok, forKey: "perm.files.ok")
+        case .bluetooth:
+            if CBManager.authorization == .notDetermined {
+                btProbe = CBCentralManager(delegate: nil, queue: nil)   // creating one is what makes macOS ask
+                for _ in 0..<60 where CBManager.authorization == .notDetermined { try? await Task.sleep(nanoseconds: 500_000_000) }
+                btProbe = nil
+                BluetoothModel.shared.refresh(force: true)
+            } else if CBManager.authorization == .denied { NSWorkspace.shared.open(p.settingsURL) }
         case .location:
             guard location.authorizationStatus == .notDetermined else { NSWorkspace.shared.open(p.settingsURL); return }
             await withCheckedContinuation { c in
@@ -205,15 +235,21 @@ struct PermissionsView: View {
                 Image(systemName: "checkmark.shield.fill").font(.ui(size: 28)).foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(firstRun ? "Let's get VitalOS set up" : "Permissions").font(.ui(size: 20, weight: .bold, design: .rounded))
-                    Text("macOS asks once for each of these. Everything stays on your Mac.")
+                    Text(firstRun ? "Here's what VitalOS can do so far. Allow All asks for each missing one, one prompt at a time. Everything stays on your Mac."
+                                  : "macOS asks once for each of these. Everything stays on your Mac.")
                         .font(.ui(size: 12)).foregroundStyle(.secondary)
                 }
             }
             VStack(spacing: 6) {
                 ForEach(Perm.allCases) { p in row(p) }
             }
+            if AppBundler.signingIdentity == "-" {
+                Label("This copy has a temporary signature, so macOS forgets these answers after each rebuild. A free Apple Development certificate fixes it: Xcode › Settings › Accounts › your Apple ID › Manage Certificates › +.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.ui(size: 11)).foregroundStyle(Theme.heat).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
-                Button("Refresh") { perms.refresh() }.buttonStyle(.borderless).font(.ui(size: 11))
+                Button("Check again") { perms.checkFoldersNow() }.buttonStyle(.borderless).font(.ui(size: 11))
                 Spacer()
                 Button(firstRun ? "Later" : "Done") { finish() }
                 Button {
@@ -232,11 +268,12 @@ struct PermissionsView: View {
         .padding(22)
         .frame(width: 520)
         .onAppear { perms.refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in perms.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in perms.refresh() }   // quiet: never prompts
     }
 
     private func finish() {
         UserDefaults.standard.set(true, forKey: "perm.onboarded")
+        UserDefaults.standard.set(2, forKey: "perm.version")
         dismiss()
     }
 
