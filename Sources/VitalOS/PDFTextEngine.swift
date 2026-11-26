@@ -546,6 +546,32 @@ enum PageAnalyzer {
         return v
     }
 
+    /// Accurate OCR of a box you drew: one TextBlock with a line per printed row inside it.
+    static func areaBlock(_ page: PDFPage, rect: CGRect, raster: PageRaster) -> TextBlock {
+        var rows: [(rect: CGRect, text: String)] = []
+        if let full = raster.cgImage {
+            let (x, y, w, h) = raster.pxRect(rect)
+            if w > 4, h > 4, let crop = full.cropping(to: CGRect(x: x, y: y, width: w, height: h)) {
+                for o in OCR.observations(crop) {
+                    guard let c = o.topCandidates(1).first else { continue }
+                    let bb = o.boundingBox
+                    let r = CGRect(x: rect.minX + bb.minX * rect.width, y: rect.minY + bb.minY * rect.height,
+                                   width: bb.width * rect.width, height: bb.height * rect.height)
+                    if let i = rows.firstIndex(where: { abs($0.rect.midY - r.midY) < min($0.rect.height, r.height) * 0.5 }) {
+                        let left = rows[i].rect.minX <= r.minX
+                        rows[i] = (rows[i].rect.union(r), left ? rows[i].text + " " + c.string : c.string + " " + rows[i].text)
+                    } else { rows.append((r, c.string)) }
+                }
+            }
+        }
+        rows.sort { $0.rect.midY > $1.rect.midY }
+        let size = max(6, (rows.first?.rect.height ?? rect.height * 0.6) * 0.8)
+        let text = NSAttributedString(string: rows.map(\.text).joined(separator: "\n"),
+                                      attributes: TextFormat(fontName: "Helvetica", size: size, color: .black).attributes())
+        let union = rows.map(\.rect).reduce(rows.first?.rect ?? rect) { $0.union($1) }
+        return TextBlock(page: page, lines: rows.map(\.rect), textRect: union, content: text, isScan: true)
+    }
+
     /// Accurate OCR of just one paragraph, run when you click it (the page scan uses the fast pass).
     static func refineText(_ b: TextBlock, raster: PageRaster) {
         guard let full = raster.cgImage else { return }
@@ -878,6 +904,14 @@ final class RichTextAnnotation: PDFAnnotation {
         // blur (box blur twice ≈ gaussian)
         let radius = Int((look.softness * s * 0.5).rounded())
         if radius > 0 { Self.boxBlur(&px, w, h, radius) }
+        // blur spreads the ink thin; scanned strokes stay dense, so put the weight back
+        if radius > 0 {
+            for i in stride(from: 0, to: px.count, by: 4) where px[i + 3] > 0 {
+                let a = min(255, Int(Double(px[i + 3]) * 1.35))
+                for k in 0..<3 { px[i + k] = UInt8(min(a, Int(Double(px[i + k]) * 1.35))) }
+                px[i + 3] = UInt8(a)
+            }
+        }
         // grain: knock random bits out of the ink, darken others
         if look.grain > 0 {
             var g = SystemRandomNumberGenerator()

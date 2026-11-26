@@ -7,12 +7,13 @@ import CoreText
 // MARK: - Tools and ribbon
 
 enum PDFTool: String, CaseIterable, Identifiable {
-    case select, editText, addText, addImage, eyedropper, crop, highlight, note, ink, rect, sign, redact
+    case select, editText, editArea, addText, addImage, eyedropper, crop, highlight, note, ink, rect, sign, redact
     var id: String { rawValue }
     var title: String {
         switch self {
         case .select: return "Select"
         case .editText: return "Edit Text"
+        case .editArea: return "Edit Area"
         case .addText: return "Add Text"
         case .addImage: return "Add Image"
         case .eyedropper: return "Copy Style"
@@ -29,6 +30,7 @@ enum PDFTool: String, CaseIterable, Identifiable {
         switch self {
         case .select: return "cursorarrow"
         case .editText: return "character.cursor.ibeam"
+        case .editArea: return "rectangle.dashed"
         case .addText: return "textformat"
         case .addImage: return "photo.badge.plus"
         case .eyedropper: return "eyedropper"
@@ -45,6 +47,7 @@ enum PDFTool: String, CaseIterable, Identifiable {
         switch self {
         case .select: return "Select text or click a mark. Drag images and added text to move them; Delete removes."
         case .editText: return "Every paragraph is outlined. Click one to edit it in place — the font, size and color are matched, even on scans."
+        case .editArea: return "Drag a box around exactly what you want to change. It's erased into the paper, you type the new text, and it blends in when you click away."
         case .addText: return "Click anywhere to type. Uses the style from Copy Style, or the last one you used."
         case .addImage: return "Click where the image should go, then pick a file. Drag the corner to resize."
         case .eyedropper: return "Click any text to copy its exact font, size and color for new text."
@@ -64,7 +67,7 @@ enum RibbonTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var tools: [PDFTool] {
         switch self {
-        case .edit: return [.select, .editText, .addText, .addImage, .eyedropper, .crop]
+        case .edit: return [.select, .editText, .editArea, .addText, .addImage, .eyedropper, .crop]
         case .comment: return [.select, .highlight, .note, .ink, .rect, .sign]
         case .protect: return [.select, .redact]
         default: return [.select]
@@ -462,6 +465,46 @@ final class PDFEditorModel: ObservableObject {
         commitEditing()
         let fam = a.content.length > 0 ? (a.content.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.fontName : nil
         startSession(a, page: page, matches: fam.map { [FontMatch(fontName: $0, score: 1)] } ?? [], isNew: false, scan: a.patch != nil && a.look.enabled, click: click)
+    }
+
+    /// You draw the box: read the text inside it, erase exactly that area into the paper, match the font, and edit.
+    func editArea(_ rect: CGRect, on page: PDFPage) {
+        commitEditing()
+        guard let raster = self.raster(for: page) else { status = "Couldn't read this page."; return }
+        let scan = PageAnalyzer.isScan(page)
+        busy = "Reading the area…"
+        Work.heavy.addOperation {
+            let b = PageAnalyzer.areaBlock(page, rect: rect, raster: raster)
+            if !b.lines.isEmpty { PageAnalyzer.match(b, raster: raster, prefer: self.pageFont(page, raster: raster)) }
+            if b.content.length == 0 || b.lines.isEmpty {
+                // nothing readable inside: an empty box in the page's own font, sized to the area
+                let size = max(6, min(rect.height * 0.7, 36)).rounded(toPlaces: 1)
+                let name = self.pageFont(page, raster: raster) ?? "Helvetica"
+                b.content = NSAttributedString(string: "", attributes: TextFormat(fontName: name, size: size, color: .black).attributes())
+                b.textRect = rect
+            }
+            // the whole box you drew becomes paper, so nothing of the old text peeks out
+            let wipe = b.lines.reduce(rect) { $0.union($1.insetBy(dx: -2, dy: -2)) }
+            b.patch = PatchMaker.clean(raster, rect: wipe)
+            b.look.enabled = true
+            if !scan { b.look.softness = min(b.look.softness, 0.2); b.look.grain = 0 }   // digital page: match it without fake grain
+            b.prepared = true
+            DispatchQueue.main.async {
+                self.busy = nil
+                self.beginEditing(b)
+            }
+        }
+    }
+
+    /// The typeface most of this page is set in, from the lines already matched (nil before any are).
+    func pageFont(_ page: PDFPage, raster: PageRaster) -> String? {
+        var votes: [String: Double] = [:]
+        let list = DispatchQueue.main.sync { blocks[ObjectIdentifier(page)] ?? [] }
+        for b in list where b.prepared {
+            let w = Double(min(40, b.content.string.filter { $0.isLetter }.count))
+            for m in b.matches.prefix(3) { votes[m.fontName, default: 0] += m.score * w }
+        }
+        return votes.max { $0.value < $1.value }?.key
     }
 
     func addText(at pt: CGPoint, on page: PDFPage, text: String = "") {
@@ -1307,6 +1350,9 @@ final class EditorPDFView: PDFView {
             model.placeSignature(on: page, at: pt)
         case .highlight:
             super.mouseDown(with: e)
+        case .editArea:
+            if let a = model.richText(at: pt, on: page) { model.beginEditing(a, page: page); return }
+            dragStart = pt; dragPage = page
         case .ink, .rect, .redact, .crop:
             dragStart = pt; dragPage = page
             if model.tool == .ink { inkPath = NSBezierPath(); inkPath?.move(to: pt) }
@@ -1343,12 +1389,12 @@ final class EditorPDFView: PDFView {
             a = PDFAnnotation(bounds: r, forType: .square, withProperties: nil)
             switch model.tool {
             case .redact: a.color = .black; a.interiorColor = .black; a.userName = "vitalos-redact"
-            case .crop: a.color = .controlAccentColor; a.interiorColor = NSColor.controlAccentColor.withAlphaComponent(0.08); a.userName = "vitalos-crop"
+            case .crop, .editArea: a.color = .controlAccentColor; a.interiorColor = NSColor.controlAccentColor.withAlphaComponent(0.08); a.userName = "vitalos-crop"
             default: a.color = NSColor(model.inkColor)
             }
         }
-        let b = PDFBorder(); b.lineWidth = model.tool == .crop ? 1 : model.inkWidth
-        if model.tool == .crop { b.style = .dashed; b.dashPattern = [4, 3] }
+        let b = PDFBorder(); b.lineWidth = model.tool == .crop || model.tool == .editArea ? 1 : model.inkWidth
+        if model.tool == .crop || model.tool == .editArea { b.style = .dashed; b.dashPattern = [4, 3] }
         a.border = b
         page.addAnnotation(a)
         temp = a
@@ -1373,6 +1419,9 @@ final class EditorPDFView: PDFView {
         if model.tool == .crop, let t = temp {
             page.removeAnnotation(t)
             model.crop(page, to: t.bounds)
+        } else if model.tool == .editArea, let t = temp {
+            page.removeAnnotation(t)
+            if t.bounds.width > 6 && t.bounds.height > 4 { model.editArea(t.bounds, on: page) }
         } else if let t = temp { model.pushUndo { [weak page] in page?.removeAnnotation(t) } }
         dragStart = nil; dragPage = nil; temp = nil; inkPath = nil
     }
