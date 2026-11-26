@@ -53,12 +53,12 @@ jobs:
             -project TriageRemote.xcodeproj -scheme Triage \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Triage.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
-            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES PROVISIONING_PROFILE_SPECIFIER= \
             CURRENT_PROJECT_VERSION="$BUILD" | tail -n 40
+          # Signed "to run locally" only: the real signing happens at export, with Apple's cloud-managed
+          # distribution certificate, so CI never makes (and never runs out of) certificates.
+          codesign -d --entitlements - "$RUNNER_TEMP/Triage.xcarchive/Products/Applications/Triage.app" 2>&1 | tail -n 20
 
       - name: Upload to TestFlight
         working-directory: iOS
