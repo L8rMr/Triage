@@ -261,7 +261,7 @@ final class MacLink: ObservableObject {
         var plainJSON: [String: Any]? { (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] }
         if let key {
             if let box = try? ChaChaPoly.SealedBox(combined: data), let plain = try? ChaChaPoly.open(box, using: key) {
-                if plain.first == 0x46 { RemoteFrames.shared.receive(plain); return }     // "F": a screen frame
+                if plain.first == 0x46 || plain.first == 0x56 { RemoteFrames.shared.receive(plain); return }   // "F" JPEG or "V" video frame
                 if let o = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] { handleSecure(o); return }
             }
             // A wrong pairing code (or a rejected auth) comes back in plain JSON.
