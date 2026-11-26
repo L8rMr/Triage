@@ -773,6 +773,9 @@ enum PageAnalyzer {
         b.textRect = CGRect(x: left, y: top - lineH * n, width: width + size * 0.5, height: lineH * n)
         b.content = NSAttributedString(string: b.content.string, attributes: f.attributes())
         b.look = main.look
+        // on a scan, new text always gets the scanner look: crisp vector text never matches scanned ink,
+        // even when the scan is clean enough that the measured blur and paper noise come out near zero
+        if b.isScan { b.look.enabled = true; b.look.softness = max(b.look.softness, 0.3); b.look.grain = max(b.look.grain, 0.12) }
     }
 
     private static func matchVector(_ b: TextBlock) {
