@@ -49,6 +49,8 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
     /// The app you were in, so closing the panel hands the keyboard straight back to it.
     private var previous: NSRunningApplication?
 
+    var isVisible: Bool { panel?.isVisible == true }
+
     func toggle() {
         if panel?.isVisible == true { hide() } else { show() }
     }
@@ -79,7 +81,7 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         }
         if monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-                guard let self, let p = self.panel, p.isKeyWindow else { return e }
+                guard let self, let p = self.panel, p.isVisible, e.window === p || p.isKeyWindow else { return e }
                 return self.engine.handleKey(e) ? nil : e
             }
         }
@@ -157,6 +159,7 @@ struct SmartSearchView: View {
                     .textFieldStyle(.plain)
                     .font(.ui(size: 22))
                     .focused($focused)
+                    .modifier(SearchKeys(engine: engine))
                 SearchStatus(engine: engine)
             }
             .padding(.horizontal, 18).padding(.vertical, 15)
@@ -199,6 +202,7 @@ struct InlineSearchField: View {
                 .textFieldStyle(.plain)
                 .font(.ui(size: size))
                 .focused($focused)
+                .modifier(SearchKeys(engine: engine))
                 .onChange(of: engine.text) { _, t in if !t.isEmpty { onType?() } }
             if engine.text.isEmpty {
                 Text("⌘K").font(.ui(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
@@ -264,7 +268,7 @@ struct SearchResultsBody: View {
             guard inline, monitor == nil else { return }
             let e = engine
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { ev in
-                if NSApp.keyWindow is SearchPanel { return ev }
+                if NSApp.keyWindow is SearchPanel || GlobalSearch.shared.isVisible { return ev }   // the floating panel owns the keys
                 return e.handleKey(ev) ? nil : ev
             }
         }
@@ -347,7 +351,8 @@ struct SearchResultsBody: View {
                 .padding(8)
             }
             .onChange(of: engine.selected) { _, s in
-                withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(s, anchor: .center) }
+                // scroll only as far as needed to keep the selection in view (centering every step made the list jump)
+                proxy.scrollTo(s)
             }
         }
     }
@@ -441,7 +446,8 @@ struct HitRow: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(selected ? Theme.accent.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+        .background(selected ? Theme.accent.opacity(0.28) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? Theme.accent.opacity(0.7) : .clear, lineWidth: 1))
         .contentShape(Rectangle())
     }
 }
@@ -509,5 +515,23 @@ struct SearchPreview: View {
         if let a = v("kMDItemAuthors") as? [String], !a.isEmpty { rows.append(InfoRow(k: "Author", v: a.joined(separator: ", "))) }
         if let ver = v("kMDItemVersion") as? String { rows.append(InfoRow(k: "Version", v: ver)) }
         return rows
+    }
+}
+
+
+/// Up, down, return and escape belong to the results list, not the text field: otherwise the arrows
+/// just jump the text cursor to the start or end of what you typed and the highlight never moves.
+struct SearchKeys: ViewModifier {
+    let engine: SmartSearch
+    func body(content: Content) -> some View {
+        content.onKeyPress(keys: [.upArrow, .downArrow, .return, .escape], phases: [.down, .repeat]) { press in
+            switch press.key {
+            case .upArrow: engine.move(-1)
+            case .downArrow: engine.move(1)
+            case .return: engine.activate(reveal: press.modifiers.contains(.command), inVitalOS: press.modifiers.contains(.option))
+            default: if engine.text.isEmpty { engine.onClose?() } else { engine.text = "" }
+            }
+            return .handled
+        }
     }
 }
