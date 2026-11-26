@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Turns every vital sign into one stress level, then a heart rate and a health score.
 struct HeartReading {
@@ -200,6 +201,10 @@ struct HeartView: View {
         }
     }
 
+    static func darkInk(_ c: Color) -> Bool {
+        (NSColor(c).usingColorSpace(.sRGB)?.brightnessComponent ?? 1) < 0.35
+    }
+
     private func bedside(_ h: HeartReading) -> some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
@@ -239,8 +244,9 @@ struct HeartView: View {
             .padding(18)
             .frame(width: 220)
         }
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .environment(\.colorScheme, .dark)
+        // a dark trace (Macintosh's one-bit black) needs a light screen, or the whole monitor is black on black
+        .background(Self.darkInk(h.color) ? Theme.panel : Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .environment(\.colorScheme, Self.darkInk(h.color) ? .light : .dark)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(h.stress >= 0.85 ? Theme.warn : Theme.stroke, lineWidth: h.stress >= 0.85 ? 2 : 1)
