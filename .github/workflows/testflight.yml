@@ -15,7 +15,7 @@ jobs:
     runs-on: xcode-27   # GitHub image with the Xcode 27 toolchain (needed for full-screen iPhone Duo)
     timeout-minutes: 45
     env:
-      DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+      DEVELOPMENT_TEAM: 5ZC843A2XK
     steps:
       - uses: actions/checkout@v4
 
@@ -26,11 +26,10 @@ jobs:
 
       - name: Check the secrets are set
         run: |
-          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
             if [ -z "${!v}" ]; then echo "::error::Missing repo secret $v (Settings › Secrets and variables › Actions)"; exit 1; fi
           done
         env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
