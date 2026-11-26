@@ -48,7 +48,7 @@ jobs:
       - name: Archive
         working-directory: iOS
         run: |
-          BUILD=$(TZ=America/New_York date +%Y%m%d%H%M)   # same scheme as Upload to TestFlight.command, so they never collide
+          BUILD=$(TZ=America/New_York date +%Y%m%d%H%M%S)   # same scheme as Upload to TestFlight.command, so they never collide
           xcodebuild archive \
             -project TriageRemote.xcodeproj -scheme Triage \
             -destination 'generic/platform=iOS' \

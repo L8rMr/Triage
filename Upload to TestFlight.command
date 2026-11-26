@@ -35,7 +35,7 @@ else
   echo "No AuthKey_$ASC_KEY_ID.p8 found; falling back to the Apple ID signed in to Xcode"
 fi
 
-BUILD=$(date +%Y%m%d%H%M)      # always higher than the last one, here or on GitHub
+BUILD=$(date +%Y%m%d%H%M%S)      # always higher than the last one, here or on GitHub
 ARCHIVE="$ROOT/.export/Triage-iOS.xcarchive"
 rm -rf "$ARCHIVE" "$ROOT/.export/ios-export"
 echo "== Archiving build ${BUILD}..."
