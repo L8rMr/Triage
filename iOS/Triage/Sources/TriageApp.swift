@@ -4,6 +4,7 @@ import SwiftUI
 struct TriageRemoteApp: App {
     @StateObject private var link = MacLink.shared
     @StateObject private var browser = MacBrowser()
+    @StateObject private var cloud = CloudDirectory.shared
     @ObservedObject private var theme = ThemeModel.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -22,16 +23,24 @@ struct TriageRemoteApp: App {
             .tint(theme.palette.accent)
             .fontDesign(theme.palette.mono ? .monospaced : .default)
             .background(Color.glass900.ignoresSafeArea())
-            .onAppear { browser.start(); fallBackToHost() }
+            .onAppear {
+                browser.start()
+                PathWatch.shared.changed = { link.networkChanged(); cloud.refreshSoon() }
+                Task { await cloud.refresh(); fallBackToHost() }
+            }
             .onChange(of: scenePhase) { _, p in
                 switch p {
-                case .active: browser.start(); link.resume(); fallBackToHost()
+                case .active: browser.start(); link.resume(); Task { await cloud.refresh(); fallBackToHost() }
                 case .background: link.suspend(); browser.stop()
                 default: break
                 }
             }
             // Paired before? Walk straight back in as soon as Bonjour sees that Mac.
             .onChange(of: browser.macs) { _, macs in
+                // Already in over the internet and now home: hop onto Wi-Fi.
+                if link.phase == .ready, link.viaInternet, let mac = macs.first(where: { $0.id == link.macName }) {
+                    link.upgrade(to: mac); return
+                }
                 guard link.phase == .idle, let want = link.rememberedMac, let mac = macs.first(where: { $0.id == want }) else { return }
                 link.connect(mac)
             }
@@ -40,13 +49,18 @@ struct TriageRemoteApp: App {
 }
 
 extension TriageRemoteApp {
-    /// Not on the Mac's Wi-Fi? If Bonjour hasn't found it after a moment, go the long way round (Tailscale).
+    /// Not on the Mac's Wi-Fi? If Bonjour hasn't found it after a moment, go the long way round:
+    /// your Macs in iCloud (Tailscale, then straight across the internet), else the typed Tailscale name.
     func fallBackToHost() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            guard link.phase == .idle || { if case .failed = link.phase { return true }; return false }(),
-                  !link.remoteHost.isEmpty,
-                  !browser.macs.contains(where: { $0.id == link.rememberedMac }) else { return }
-            link.connect(host: link.remoteHost)
+            guard link.phase == .idle || { if case .failed = link.phase { return true }; return false }() else { return }
+            if let want = link.rememberedMac, browser.macs.contains(where: { $0.id == want }) { return }
+            let mine = cloud.macs.first { $0.name == link.rememberedMac } ?? (cloud.macs.count == 1 ? cloud.macs.first : nil)
+            if let mine {
+                link.connect(anywhere: mine, lan: browser.macs)
+            } else if !link.remoteHost.isEmpty {
+                link.connect(host: link.remoteHost)
+            }
         }
     }
 }

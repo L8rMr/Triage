@@ -3,6 +3,7 @@ import SwiftUI
 /// Before there's a Mac: a flat line looking for a pulse.
 struct ConnectView: View {
     @ObservedObject var browser: MacBrowser
+    @ObservedObject private var cloud = CloudDirectory.shared
     @EnvironmentObject var link: MacLink
     @State private var code = ""
     @FocusState private var codeFocused: Bool
@@ -36,6 +37,9 @@ struct ConnectView: View {
         .animation(.snappy, value: link.phase)
     }
 
+    /// In iCloud but not on this Wi-Fi.
+    private var awayMacs: [CloudMac] { cloud.macs.filter { m in !browser.macs.contains { $0.id == m.name } } }
+
     private var isConnecting: Bool {
         if case .connecting = link.phase { return true }
         if case .needsCode = link.phase { return true }
@@ -47,17 +51,19 @@ struct ConnectView: View {
         case .connecting(let n): return "Finding \(n)'s pulse"
         case .needsCode: return "Type the code on your Mac"
         case .failed: return "Lost the pulse"
-        default: return browser.macs.isEmpty ? "Looking for your Mac" : "Pick your Mac"
+        default: return browser.macs.isEmpty && awayMacs.isEmpty ? "Looking for your Mac" : "Pick your Mac"
         }
     }
 
     private var subtitle: String {
         switch link.phase {
         case .needsCode: return "\(link.macName) is showing six digits at the top of its screen."
-        case .failed: return "Make sure Triage is open on your Mac and iPhone access is on in Settings › iPhone."
+        case .failed: return "Make sure your Mac is awake with Triage open and iPhone access on in Settings › iPhone."
+
         default:
+            if !awayMacs.isEmpty { return "Your Macs, here on Wi-Fi or anywhere through iCloud." }
             return browser.macs.isEmpty
-                ? "Open Triage on your Mac, then turn on Settings › iPhone. Both need to be on the same Wi-Fi."
+                ? "Open Triage on your Mac and turn on Settings › iPhone. Same Wi-Fi, or the same iCloud account from anywhere."
                 : "Macs on this Wi-Fi running Triage."
         }
     }
@@ -82,11 +88,33 @@ struct ConnectView: View {
                 }
                 .buttonStyle(.plain)
             }
-            if browser.macs.isEmpty {
+            ForEach(awayMacs) { mac in
+                Button { link.connect(anywhere: mac, lan: browser.macs) } label: {
+                    Card {
+                        HStack(spacing: 14) {
+                            Image(systemName: "icloud").font(.title2).foregroundStyle(Color.phosphor)
+                                .frame(width: 44, height: 44)
+                                .background(Color.phosphor.opacity(0.12), in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mac.name).font(.headline)
+                                Text("Through iCloud · no code · seen \(mac.seen.formatted(.relative(presentation: .named)))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            if browser.macs.isEmpty && awayMacs.isEmpty {
                 ProgressView().padding(.top, 8)
+                if !cloud.status.isEmpty {
+                    Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
             }
             Button { host = link.remoteHost; askHost = true } label: {
-                Label("Away from home? Connect over Tailscale", systemImage: "globe")
+                Label("Connect by Tailscale name instead", systemImage: "globe")
                     .font(.subheadline.weight(.semibold))
             }
             .padding(.top, 10)

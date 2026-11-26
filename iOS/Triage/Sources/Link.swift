@@ -17,6 +17,23 @@ struct LinkError: Error, LocalizedError {
 struct FoundMac: Identifiable, Hashable {
     let id: String          // Bonjour service name = the Mac's name
     let endpoint: NWEndpoint
+    var quic = false        // the direct internet door (QUIC through a punched hole)
+    var localPort: UInt16?  // QUIC must leave from the port STUN saw, or the hole doesn't match
+}
+
+/// One way of reaching the Mac. Tried in order until one answers.
+enum Route {
+    case lan(FoundMac)                 // Bonjour on this Wi-Fi
+    case address(String, String)       // host, label ("Wi-Fi", "Tailscale")
+    case p2p(CloudMac)                 // straight across the internet, introduced by iCloud
+
+    var label: String {
+        switch self {
+        case .lan: return "Wi-Fi"
+        case .address(_, let l): return l
+        case .p2p: return "Internet (direct)"
+        }
+    }
 }
 
 final class MacBrowser: ObservableObject {
@@ -65,6 +82,8 @@ final class MacLink: ObservableObject {
     @Published private(set) var info: MacInfo?
     @Published private(set) var vitals: Vitals?
     @Published private(set) var reconnecting = false
+    /// How we're talking right now: Wi-Fi, Tailscale, Internet (direct).
+    @Published private(set) var route = ""
 
     var canEdit: Bool { mode == "full" }
 
@@ -85,6 +104,11 @@ final class MacLink: ObservableObject {
     private var pending: [Int: (Result<[String: Any], LinkError>) -> Void] = [:]
     private var wantConnected = false
     private var attempt = 0
+    private var plan: [Route] = []         // what's left to try for this connection
+    private var cloudMac: CloudMac?        // known through iCloud: lets every reconnect re-plan its way in
+    private var gen = 0                    // bumps on every attempt, so stale timers stay quiet
+    private var heard = false              // the Mac said hello on this attempt
+    private var label = ""
 
     let deviceID: String = {
         if let s = UserDefaults.standard.string(forKey: "link.deviceID") { return s }
@@ -106,41 +130,139 @@ final class MacLink: ObservableObject {
         didSet { UserDefaults.standard.set(remoteHost, forKey: "link.host") }
     }
 
-    func connect(host: String) {
+    static func endpoint(_ host: String) -> NWEndpoint {
         let h = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !h.isEmpty else { return }
         let parts = h.split(separator: ":")
         let port = parts.count == 2 ? UInt16(parts[1]) ?? 52384 : 52384
         let name = String(parts.first ?? Substring(h))
-        connect(FoundMac(id: name, endpoint: .hostPort(host: NWEndpoint.Host(name), port: NWEndpoint.Port(rawValue: port)!)))
+        return .hostPort(host: NWEndpoint.Host(name), port: NWEndpoint.Port(rawValue: port)!)
     }
 
-    var viaInternet: Bool { if case .hostPort = target?.endpoint { return true }; return false }
+    func connect(host: String) {
+        let h = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !h.isEmpty else { return }
+        start([.address(h, "Tailscale")], cloud: nil)
+    }
+
+    var viaInternet: Bool { route != "Wi-Fi" && !route.isEmpty }
 
     func connect(_ mac: FoundMac) {
-        wantConnected = true
-        target = mac
-        open()
+        // Bonjour first; if it's also in iCloud, a dropped Wi-Fi can fall through to the internet.
+        let cloud = CloudDirectory.shared.macs.first { $0.name == mac.id }
+        start([.lan(mac)] + (cloud.map { Self.plan(for: $0, lan: []) } ?? []), cloud: cloud)
     }
 
-    private func open() {
+    /// From anywhere: this Wi-Fi, the Mac's own addresses, Tailscale, then straight across the internet.
+    func connect(anywhere mac: CloudMac, lan: [FoundMac]) {
+        start(Self.plan(for: mac, lan: lan), cloud: mac)
+    }
+
+    static func plan(for mac: CloudMac, lan: [FoundMac]) -> [Route] {
+        var p: [Route] = []
+        if let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
+        if PathWatch.shared.onWiFi { p += mac.lan.prefix(2).map { .address("\($0):\(mac.port)", "Wi-Fi") } }
+        if let t = mac.tailscale, !t.isEmpty { p.append(.address("\(t):\(mac.port)", "Tailscale")) }
+        let typed = (UserDefaults.standard.string(forKey: "link.host") ?? "").trimmingCharacters(in: .whitespaces)
+        if !typed.isEmpty, typed != mac.tailscale { p.append(.address(typed, "Tailscale")) }
+        p.append(.p2p(mac))
+        return p
+    }
+
+    private func start(_ routes: [Route], cloud: CloudMac?) {
+        q.async {
+            self.wantConnected = true
+            self.cloudMac = cloud
+            self.plan = routes
+            self.attempt = 0
+            self.next()
+        }
+    }
+
+    /// Try the next way in. On q.
+    private func next() {
+        guard wantConnected else { return }
+        guard !plan.isEmpty else {
+            // nothing left this round: lost() waits a moment, then starts over from the top (fresh addresses)
+            lost("Couldn't reach \(macName.isEmpty ? "your Mac" : macName)")
+            return
+        }
+        let r = plan.removeFirst()
+        label = r.label
+        switch r {
+        case .lan(let m): target = m; open()
+        case .address(let h, let l):
+            guard !h.isEmpty else { next(); return }
+            target = FoundMac(id: cloudMac?.name ?? h, endpoint: Self.endpoint(h))
+            label = l
+            open()
+        case .p2p(let mac):
+            let g = gen
+            DispatchQueue.main.async { if self.phase != .ready { self.phase = .connecting(mac.name) } else { self.reconnecting = true } }
+            Task {
+                do {
+                    let local = UInt16.random(in: 49_200...64_000)
+                    guard let me = await Stun.query(localPort: local) else { throw LinkError("This network blocks direct connections") }
+                    let there = try await CloudDirectory.shared.knock(mac, from: me)
+                    self.q.async {
+                        guard self.gen == g, self.wantConnected else { return }
+                        self.target = FoundMac(id: mac.name, endpoint: .hostPort(host: NWEndpoint.Host(there.host),
+                                                                                port: NWEndpoint.Port(rawValue: UInt16(there.port))!),
+                                               quic: true, localPort: local)
+                        self.open()
+                    }
+                } catch {
+                    self.q.async { if self.gen == g { self.fellThrough(error.localizedDescription) } }
+                }
+            }
+        }
+    }
+
+    /// This way in didn't work. On q.
+    private func fellThrough(_ why: String) {
+        if !plan.isEmpty { teardown(); next() } else { lost(why) }
+    }
+
+    private func open() {   // on q
         guard let target else { return }
-        q.async { self.teardown() }
+        teardown()
+        gen += 1
+        heard = false
+        let g = gen
         DispatchQueue.main.async {
             self.macName = target.id
             if self.phase != .ready { self.phase = .connecting(target.id) } else { self.reconnecting = true }
         }
-        let tcp = NWProtocolTCP.Options()
-        tcp.noDelay = true            // every touch goes out now, not batched: this is what makes the remote feel immediate
-        let params = NWParameters(tls: nil, tcp: tcp)
+        let params: NWParameters
+        if target.quic {
+            let quic = NWProtocolQUIC.Options(alpn: ["triage"])
+            quic.idleTimeout = 60_000
+            // The certificate is the Mac's own; who it really is gets proven inside, by the pairing secret.
+            sec_protocol_options_set_verify_block(quic.securityProtocolOptions, { _, _, done in done(true) }, q)
+            params = NWParameters(quic: quic)
+            params.allowLocalEndpointReuse = true
+            if let lp = target.localPort { params.requiredLocalEndpoint = .hostPort(host: .ipv4(.any), port: NWEndpoint.Port(rawValue: lp)!) }
+            params.defaultProtocolStack.applicationProtocols.insert(NWProtocolFramer.Options(definition: TriageFramer.definition), at: 0)
+        } else {
+            let tcp = NWProtocolTCP.Options()
+            tcp.noDelay = true            // every touch goes out now, not batched: this is what makes the remote feel immediate
+            tcp.connectionTimeout = 4
+            params = NWParameters(tls: nil, tcp: tcp)
+            let ws = NWProtocolWebSocket.Options()
+            ws.autoReplyPing = true
+            ws.maximumMessageSize = 16 << 20
+            params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
+        }
         params.serviceClass = .interactiveVideo
-        let ws = NWProtocolWebSocket.Options()
-        ws.autoReplyPing = true
-        ws.maximumMessageSize = 16 << 20
-        params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
-        // Bonjour gives a service, WebSocket wants a URL-ish path; the service endpoint works as is.
         let c = NWConnection(to: target.endpoint, using: params)
-        q.async {
+        // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
+        if !plan.isEmpty {
+            q.asyncAfter(deadline: .now() + (target.quic ? 6 : 3.5)) { [weak self] in
+                guard let self, self.gen == g, !self.heard else { return }
+                self.fellThrough("Timed out")
+            }
+        }
+        do {
+            self.quic = target.quic
             self.eph = P256.KeyAgreement.PrivateKey()
             self.key = nil
             self.seq = 0
@@ -149,9 +271,10 @@ final class MacLink: ObservableObject {
                 guard let self, let c, c === self.conn else { return }
                 switch st {
                 case .ready: self.sendPlain(["t": "hello", "v": 1, "id": self.deviceID, "name": self.deviceName,
+                                             "cloud": CloudDirectory.knownMacIDs,
                                              "pub": self.eph.publicKey.rawRepresentation.base64EncodedString()])
-                case .failed(let e): self.lost("Couldn't reach \(target.id): \(e.localizedDescription)")
-                case .waiting(let e): self.lost("Waiting for \(target.id): \(e.localizedDescription)")
+                case .failed(let e): self.dropped("Couldn't reach \(target.id): \(e.localizedDescription)")
+                case .waiting(let e): self.dropped("Waiting for \(target.id): \(e.localizedDescription)")
                 case .cancelled: break
                 default: break
                 }
@@ -160,6 +283,12 @@ final class MacLink: ObservableObject {
             self.receive(c)
         }
     }
+    private var quic = false
+
+    /// A connection ended. Before the Mac answered: try the next way in. After: reconnect. On q.
+    private func dropped(_ why: String) {
+        if !heard && !plan.isEmpty { fellThrough(why) } else { lost(why) }
+    }
 
     /// Going to the background: hang up politely, come back on resume.
     func suspend() {
@@ -167,9 +296,41 @@ final class MacLink: ObservableObject {
     }
 
     func resume() {
-        guard wantConnected, target != nil else { return }
-        attempt = 0
-        open()
+        q.async {
+            guard self.wantConnected, self.target != nil else { return }
+            self.attempt = 0
+            self.replan()
+        }
+    }
+
+    /// Start over from the best way in (on q). Wi-Fi came back, or the network changed under us.
+    private func replan() {
+        if let c = cloudMac {
+            let lan: [Route] = target.flatMap { t -> Route? in if case .service = t.endpoint { return .lan(t) }; return nil }.map { [$0] } ?? []
+            plan = lan + Self.plan(for: c, lan: [])
+            next()
+        } else { open() }
+    }
+
+    /// Wi-Fi ↔ cellular: don't wait for the old road to time out, take the best one now.
+    func networkChanged() {
+        q.async {
+            guard self.wantConnected, self.conn != nil else { return }
+            let onWiFi = PathWatch.shared.onWiFi
+            // leaving Wi-Fi kills Wi-Fi routes; arriving on Wi-Fi, Bonjour's upgrade(to:) does the hop
+            if !onWiFi && self.label == "Wi-Fi" { self.attempt = 0; self.replan() }
+        }
+    }
+
+    /// Bonjour just saw our Mac while we're on the long way round: hop onto Wi-Fi without dropping the screen.
+    func upgrade(to mac: FoundMac) {
+        q.async {
+            guard self.wantConnected, self.label != "Wi-Fi" else { return }
+            self.plan = (self.cloudMac.map { Self.plan(for: $0, lan: []) } ?? [])
+            self.target = mac
+            self.label = "Wi-Fi"
+            self.open()
+        }
     }
 
     func disconnect() {
@@ -189,6 +350,7 @@ final class MacLink: ObservableObject {
         conn?.cancel()
         conn = nil
         key = nil
+        heard = false
         let p = pending
         pending = [:]
         DispatchQueue.main.async { p.values.forEach { $0(.failure(LinkError("Disconnected"))) } }
@@ -204,7 +366,7 @@ final class MacLink: ObservableObject {
             let delay = min(Double(attempt) * 1.5, 8)
             q.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.wantConnected, self.conn == nil else { return }
-                self.open()
+                self.replan()
             }
         } else {
             DispatchQueue.main.async { self.phase = .failed(why); self.reconnecting = false }
@@ -223,7 +385,7 @@ final class MacLink: ObservableObject {
     private func receive(_ c: NWConnection) {
         c.receiveMessage { [weak self, weak c] data, ctx, _, err in
             guard let self, let c, c === self.conn else { return }
-            if let err { self.lost(err.localizedDescription); return }
+            if let err { self.dropped(err.localizedDescription); return }
             if let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .close { self.lost("The Mac hung up"); return }
             if let data, !data.isEmpty { self.handle(data) }
@@ -232,8 +394,8 @@ final class MacLink: ObservableObject {
     }
 
     private func sendRaw(_ d: Data) {
-        let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
-        let ctx = NWConnection.ContentContext(identifier: "triage", metadata: [meta])
+        let ctx = quic ? TriageFramer.context
+            : NWConnection.ContentContext(identifier: "triage", metadata: [NWProtocolWebSocket.Metadata(opcode: .binary)])
         conn?.send(content: d, contentContext: ctx, isComplete: true, completion: .contentProcessed { _ in })
     }
 
@@ -283,6 +445,7 @@ final class MacLink: ObservableObject {
                   let n = (o["nonce"] as? String).flatMap({ Data(base64Encoded: $0) }) else { fail("That doesn't look like Triage"); return }
             serverPub = pub
             nonce = n
+            heard = true
             macID = o["macID"] as? String ?? (o["name"] as? String)
             let name = o["name"] as? String ?? "Mac"
             let paired = o["paired"] as? Bool ?? false
@@ -291,6 +454,15 @@ final class MacLink: ObservableObject {
                 let mac = HMAC<SHA256>.authenticationCode(for: transcript("auth"), using: SymmetricKey(data: secret))
                 unlock(secret)
                 sendPlain(["t": "auth", "mac": Data(mac).base64EncodedString()])
+            } else if !paired, let id = macID, let cloud = CloudDirectory.secret(for: id),
+                      let shared = try? eph.sharedSecretFromKeyAgreement(with: pub) {
+                // Same iCloud account: prove it with the Mac's iCloud key and pair without a code.
+                let proof = HMAC<SHA256>.authenticationCode(for: transcript("cloudpair"), using: SymmetricKey(data: cloud))
+                let s = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: cloud, sharedInfo: Data("triage-pair-v1".utf8),
+                                                       outputByteCount: 32).withUnsafeBytes { Data($0) }
+                pendingSecret = (id, s)
+                sendPlain(["t": "cloudPair", "proof": Data(proof).base64EncodedString()])
+                unlock(s)
             } else {
                 if let id = macID { Keychain.delete(id) }
                 DispatchQueue.main.async { self.phase = .needsCode(wrong: false); self.reconnecting = false }
@@ -335,7 +507,9 @@ final class MacLink: ObservableObject {
             let mode = body["mode"] as? String ?? "view"
             let name = target?.id
             let theme = body["theme"] as? String
+            let via = label
             DispatchQueue.main.async {
+                self.route = via
                 if let theme { ThemeModel.shared.macThemeID = theme }
                 self.info = info
                 self.mode = mode

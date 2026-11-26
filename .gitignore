@@ -11,3 +11,5 @@ TestFiles/*.log
 TestFiles/perf.log
 dist/
 iOS/*.xcodeproj/
+Mac/*.xcodeproj/
+Mac/Generated/

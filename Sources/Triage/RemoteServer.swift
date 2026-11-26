@@ -93,6 +93,7 @@ final class RemoteServer: ObservableObject {
         load()
         apply()
         if UserDefaults.standard.bool(forKey: "remote.keepAwake") { setKeepAwake(true, by: nil) }
+        CloudPresence.shared.start()            // reachable from anywhere through the user's iCloud
         vitalsSink = SystemMonitor.shared.$bpm
             .receive(on: DispatchQueue.main)        // @Published fires in willSet; hop once so we read the new values
             .sink { [weak self] _ in self?.pushVitals() }
@@ -177,6 +178,14 @@ final class RemoteServer: ObservableObject {
         UserDefaults.standard.set(keep, forKey: "remote.keepAwake")
         Self.watching = false
         status = "Off"
+    }
+
+    /// A phone arriving over the internet (QUIC + length-prefixed frames instead of WebSocket).
+    func acceptFramed(_ c: NWConnection) {     // on queue
+        guard mode != .off else { c.cancel(); return }
+        let s = RemoteSession(conn: c, server: self, framed: true)
+        sessions[s.id] = s
+        s.start()
     }
 
     private func accept(_ c: NWConnection) {   // on queue
@@ -428,9 +437,18 @@ final class RemoteSession {
     private var lastSeq = 0
     private var closed = false
 
-    init(conn: NWConnection, server: RemoteServer) {
+    let framed: Bool
+    private var cloudCandidate = false
+
+    init(conn: NWConnection, server: RemoteServer, framed: Bool = false) {
         self.conn = conn
         self.server = server
+        self.framed = framed
+    }
+
+    private var context: NWConnection.ContentContext {
+        framed ? TriageFramer.context
+               : NWConnection.ContentContext(identifier: "triage", metadata: [NWProtocolWebSocket.Metadata(opcode: .binary)])
     }
 
     func start() {
@@ -464,7 +482,7 @@ final class RemoteSession {
         conn.receiveMessage { [weak self] data, ctx, _, err in
             guard let self, !self.closed else { return }
             if err != nil { self.close(); return }
-            if let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+            if !self.framed, let meta = ctx?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
                meta.opcode == .close { self.close(); return }
             if let data, !data.isEmpty { self.handle(data) }
             if !self.closed { self.receive() }
@@ -474,9 +492,7 @@ final class RemoteSession {
     // MARK: Sending
 
     private func sendRaw(_ d: Data) {
-        let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
-        let ctx = NWConnection.ContentContext(identifier: "triage", metadata: [meta])
-        conn.send(content: d, contentContext: ctx, isComplete: true, completion: .contentProcessed { _ in })
+        conn.send(content: d, contentContext: context, isComplete: true, completion: .contentProcessed { _ in })
     }
 
     private func sendPlain(_ o: [String: Any]) {
@@ -499,9 +515,7 @@ final class RemoteSession {
         let limit = payload.first == 0x56 ? 5 : 2       // video frames are small; JPEGs aren't
         guard let key, !closed, framesInFlight < limit, let box = try? ChaChaPoly.seal(payload, using: key) else { return false }
         framesInFlight += 1
-        let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
-        let ctx = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
-        conn.send(content: box.combined, contentContext: ctx, isComplete: true, completion: .contentProcessed { [weak self] _ in
+        conn.send(content: box.combined, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] _ in
             guard let self else { return }
             self.server.queue.async { self.framesInFlight = max(0, self.framesInFlight - 1) }
         })
@@ -534,7 +548,9 @@ final class RemoteSession {
             sendPlain(["t": "hello", "v": 1, "name": Host.current().localizedName ?? "Mac", "macID": RemoteServer.macID,
                        "pub": serverPubRaw.base64EncodedString(), "nonce": nonce.base64EncodedString(),
                        "paired": known, "mode": server.mode.rawValue])
-            if !known { code = server.beginPairing(self) }
+            // Same iCloud account? The phone read our pairing key from the private database: no code needed.
+            cloudCandidate = !known && ((o["cloud"] as? [String]) ?? []).contains(RemoteServer.macID)
+            if !known && !cloudCandidate { code = server.beginPairing(self) }
 
         case "auth":
             guard let id = deviceID, let secret = server.secret(for: id),
@@ -542,6 +558,22 @@ final class RemoteSession {
                   HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: transcript("auth"), using: SymmetricKey(data: secret))
             else { reject("This iPhone isn't paired with this Mac any more"); return }
             unlock(with: secret)
+            sendSecure(["t": "ready", "body": RemoteAPI.hello(mode: server.mode)])
+            server.authenticated(self)
+
+        case "cloudPair":
+            guard cloudCandidate, let id = deviceID, let clientPub,
+                  let proof = (o["proof"] as? String).flatMap({ Data(base64Encoded: $0) }) else { reject("Not pairing"); return }
+            let cloud = CloudPresence.cloudSecret
+            guard HMAC<SHA256>.isValidAuthenticationCode(proof, authenticating: transcript("cloudpair"), using: SymmetricKey(data: cloud)),
+                  let shared = try? eph.sharedSecretFromKeyAgreement(with: clientPub) else {
+                reject("This iPhone isn't on the same iCloud account"); return
+            }
+            let secretData = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: cloud, sharedInfo: Data("triage-pair-v1".utf8),
+                                                            outputByteCount: 32).withUnsafeBytes { Data($0) }
+            server.storePairing(id: id, name: deviceName, secret: secretData)
+            server.record(deviceName, "Paired through iCloud")
+            unlock(with: secretData)
             sendSecure(["t": "ready", "body": RemoteAPI.hello(mode: server.mode)])
             server.authenticated(self)
 

@@ -290,6 +290,7 @@ private struct HeartPage: View {
 
 private struct IPhonePage: View {
     @ObservedObject private var remote = RemoteServer.shared
+    @ObservedObject private var cloud = CloudPresence.shared
 
     var body: some View {
         PageHeader(title: "iPhone", subtitle: "Check on this Mac from your iPhone over Wi-Fi: vitals, files, apps. Everything stays on your network, encrypted end to end.")
@@ -303,6 +304,9 @@ private struct IPhonePage: View {
                 Row(title: "Remote desktop", hint: "\(w) is viewing and controlling this Mac") {
                     Button("Stop") { remote.endDesktop() }
                 }
+            }
+            Row(title: "From anywhere", hint: cloud.publicAddress.map { "Internet address \($0) · Tailscale \(NetAddrs.tailscale() ?? "off")" }) {
+                Text(cloud.status).font(.ui(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.trailing).frame(maxWidth: 360, alignment: .trailing)
             }
             Row(title: "Status", hint: remote.keepAwake ? "Kept awake from the iPhone" : nil) {
                 HStack(spacing: 6) {

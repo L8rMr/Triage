@@ -1,0 +1,34 @@
+name: TriageMac
+options:
+  bundleIdPrefix: com.alenlvovich
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: 5ZC643A2XK
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Triage:
+    type: application
+    platform: macOS
+    sources:
+      - path: ../Sources/Triage
+      - path: ../Resources/Fonts
+        type: folder
+        buildPhase: resources
+      - path: Generated/AppIcon.icns
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Triage
+        PRODUCT_BUNDLE_IDENTIFIER: com.alenlvovich.triage
+        INFOPLIST_FILE: ../Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Triage.entitlements
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OPTIMIZATION_LEVEL: -O
+        DEAD_CODE_STRIPPING: YES
