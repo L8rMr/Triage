@@ -18,13 +18,15 @@ struct SmartQuery {
     var sizeLabel: String?
     var scope: URL?
     var scopeLabel: String?
+    /// "largest", "smallest", "newest", "oldest": sort the results instead of searching for the word
+    var order: String?
     var from: String?
     var exts: [String] = []
     var math: String?
 
     var hasCriteria: Bool {
         !terms.isEmpty || !phrases.isEmpty || !kinds.isEmpty || after != nil || before != nil
-            || minSize != nil || maxSize != nil || from != nil || !exts.isEmpty
+            || minSize != nil || maxSize != nil || from != nil || !exts.isEmpty || scope != nil
     }
 
     /// What VitalOS understood, shown as chips under the search field.
@@ -35,6 +37,13 @@ struct SmartQuery {
         if let d = dateLabel { c.append(dateVerb == "edited" ? d : "\(dateVerb) \(d)") }
         if let s = sizeLabel { c.append(s) }
         if let s = scopeLabel { c.append("in \(s)") }
+        switch order {
+        case "size-desc": c.append("largest first")
+        case "size-asc": c.append("smallest first")
+        case "date-desc": c.append("newest first")
+        case "date-asc": c.append("oldest first")
+        default: break
+        }
         if let f = from { c.append("from \(f)") }
         c += phrases.map { "“\($0)”" }
         if !terms.isEmpty { c.append("name or text: " + terms.joined(separator: " + ")) }
@@ -66,6 +75,8 @@ struct SmartQuery {
         if let m = minSize { parts.append("kMDItemFSSize > \(m)") }
         if let m = maxSize { parts.append("kMDItemFSSize < \(m)") }
         if let f = from { parts.append("kMDItemWhereFroms == \"*\(Self.clean(f))*\"cd") }
+        // only a place (and maybe an order): everything in that folder
+        if parts.isEmpty, scope != nil { parts.append("kMDItemFSName == \"*\"") }
         return parts.joined(separator: " && ")
     }
 }
@@ -75,6 +86,7 @@ enum SmartParser {
         "a", "an", "the", "my", "me", "i", "of", "for", "with", "and", "or", "file", "files", "find", "show",
         "all", "that", "which", "some", "any", "called", "named", "about", "to", "on", "at", "is", "are",
         "was", "were", "stuff", "things", "where", "get", "open", "in", "inside", "from", "during", "ago",
+        "please", "what", "whats", "what's", "can", "you", "give", "list", "display", "one", "ones", "most",
     ]
 
     private static let kindMap: [String: (String, String)] = {
@@ -254,7 +266,12 @@ enum SmartParser {
                 let start = cal.startOfDay(for: now)
                 q.after = cal.date(byAdding: .day, value: -1, to: start); q.before = start; q.dateLabel = "yesterday"; i += 1; continue
             }
-            if w == "recent" || w == "recently" || w == "latest" || w == "new" {
+            // superlatives sort rather than filter
+            if ["largest", "biggest", "heaviest", "fattest"].contains(w) { q.order = "size-desc"; i += 1; continue }
+            if ["smallest", "tiniest", "lightest"].contains(w) { q.order = "size-asc"; i += 1; continue }
+            if ["newest", "latest"].contains(w) || (w == "most" && next == "recent") { q.order = "date-desc"; i += w == "most" ? 2 : 1; continue }
+            if w == "oldest" { q.order = "date-asc"; i += 1; continue }
+            if w == "recent" || w == "recently" || w == "new" {
                 q.after = cal.date(byAdding: .day, value: -7, to: now); q.dateLabel = "in the last 7 days"; i += 1; continue
             }
             if ["this", "last", "past"].contains(w), let n = next, let comp = units[n] {
@@ -310,6 +327,13 @@ enum SmartParser {
                 let url = p.hasPrefix("/") ? URL(fileURLWithPath: p) : (p.isEmpty ? Places.home : Places.home.appendingPathComponent(p))
                 q.scope = url; q.scopeLabel = p.isEmpty ? "Home" : url.lastPathComponent
                 i += 2; continue
+            }
+
+            // a bare folder name is a place too: "largest video download", "pdfs desktop"
+            if q.scope == nil, let p = places[w], !p.isEmpty, !p.hasPrefix("/") {
+                let url = Places.home.appendingPathComponent(p)
+                q.scope = url; q.scopeLabel = url.lastPathComponent
+                i += 1; continue
             }
 
             // provenance: "from github", "from mail.google.com", "from slack"
@@ -596,7 +620,14 @@ final class SmartSearch: ObservableObject {
                            modified: mod, size: size, contentOnly: contentOnly, score: sc))
         }
         total = out.count
-        let sorted = out.sorted { $0.score > $1.score }
+        let sorted: [Hit]
+        switch parsed.order {
+        case "size-desc": sorted = out.sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+        case "size-asc": sorted = out.sorted { ($0.size ?? .max) < ($1.size ?? .max) }
+        case "date-desc": sorted = out.sorted { ($0.lastUsed ?? $0.modified ?? .distantPast) > ($1.lastUsed ?? $1.modified ?? .distantPast) }
+        case "date-asc": sorted = out.sorted { ($0.modified ?? .distantFuture) < ($1.modified ?? .distantFuture) }
+        default: sorted = out.sorted { $0.score > $1.score }
+        }
 
         var secs: [Section] = []
         if recentsMode {

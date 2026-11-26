@@ -80,8 +80,13 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         // Typing only reaches us if VitalOS is the active app: a panel can be key while keystrokes still go to
         // whatever app was in front. Activate, show the panel, then put the cursor in the field ourselves.
         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier { previous = front }
+        // If VitalOS is already the active app (its window is in front on this screen), a non-activating panel
+        // never takes the keyboard from it: the main window keeps key/main and swallows typing. Act like a
+        // normal panel then; stay non-activating only when another app is in front, so that app keeps its place.
+        if NSApp.isActive { panel.styleMask.remove(.nonactivatingPanel) } else { panel.styleMask.insert(.nonactivatingPanel) }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
+        if NSApp.isActive { panel.makeMain() }   // main too, so the main window's shortcuts (like Space for Quick Look) can't grab keys
         engine.focusToken += 1
         DispatchQueue.main.async { [weak self] in self?.focusField() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -183,6 +188,8 @@ struct SmartSearchView: View {
     private var hasText: Bool { !engine.text.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
+        // exactly the panel's height: the field on top, results get only what's left (no overflow clipping the field)
+        GeometryReader { geo in
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "sparkle.magnifyingglass")
@@ -199,11 +206,13 @@ struct SmartSearchView: View {
             if hasText {
                 Divider().opacity(0.5)
                 SearchResultsBody(engine: engine, inline: false)
-                    .transition(.opacity.combined(with: .offset(y: -6)))
+                    .frame(maxHeight: max(0, geo.size.height - GlobalSearch.collapsedHeight - 1))
+                    .clipped()
+                    .transition(.opacity)
             }
         }
-        .frame(width: 800)
-        .frame(maxHeight: .infinity, alignment: .top)     // follows the panel as it unfolds
+        .frame(width: 800, height: geo.size.height, alignment: .top)   // follows the panel as it unfolds
+        }
         .animation(.easeOut(duration: 0.18), value: hasText)
         .background(VisualEffect(material: .popover))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
