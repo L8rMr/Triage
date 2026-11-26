@@ -370,8 +370,9 @@ struct SearchResultsBody: View {
                     ForEach(engine.sections) { sec in
                         header(sec.id.rawValue)
                         ForEach(sec.hits) { hit in
+                            // identity is the file (ForEach's own id), never the row number: rows tagged 0, 1, 2…
+                                // were reused by the lazy list after a new search, so it kept drawing the old results
                             HitRow(hit: hit, selected: hit.index == engine.selected)
-                                .id(hit.index)
                                 .onTapGesture(count: 2) { engine.selected = hit.index; engine.activate() }
                                 .onTapGesture { engine.selected = hit.index }
                                 .draggable(hit.url)
@@ -400,7 +401,7 @@ struct SearchResultsBody: View {
             }
             .onChange(of: engine.selected) { _, s in
                 // scroll only as far as needed to keep the selection in view (centering every step made the list jump)
-                proxy.scrollTo(s)
+                if s >= 0, s < engine.flat.count { proxy.scrollTo(engine.flat[s].id) } else if s == -1 { proxy.scrollTo(-1) }
             }
         }
     }
