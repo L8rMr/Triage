@@ -83,7 +83,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
 struct MainView: View {
     @EnvironmentObject var link: MacLink
     @Environment(\.horizontalSizeClass) private var hsc
-    @SceneStorage("section") private var section: Pane = .home
+    @State private var section: Pane = .home      // every fresh open starts on Home
     @State private var previous: Pane = .home
     @State private var columns: NavigationSplitViewVisibility = .automatic
 
