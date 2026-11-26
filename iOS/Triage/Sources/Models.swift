@@ -133,12 +133,13 @@ enum Fmt {
 
 struct Card<Content: View>: View {
     var padding: CGFloat = 16
+    var fill = false
     @ViewBuilder var content: Content
     var body: some View {
         let p = ThemeModel.current
         content
             .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
             .background(p.card, in: RoundedRectangle(cornerRadius: p.radius + 6, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: p.radius + 6, style: .continuous).stroke(p.stroke.opacity(p.id == "mac1bit" ? 1 : 0.6), lineWidth: 1))
     }

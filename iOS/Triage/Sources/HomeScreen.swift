@@ -8,27 +8,41 @@ struct HomeScreen: View {
     @State private var width: CGFloat = 0
     var go: (Pane) -> Void = { _ in }
 
-    private var columns: [GridItem] {
-        let n = width > 1000 ? 3 : width > 640 ? 2 : 1
-        return Array(repeating: GridItem(.flexible(), spacing: 14, alignment: .top), count: n)
+    private var columnCount: Int { width > 1000 ? 3 : width > 640 ? 2 : 1 }
+
+    /// Tiles in reading order, paired so neighbours are similar in size.
+    private var tiles: [AnyView] {
+        var t: [AnyView] = [
+            AnyView(NavigationLink { HeartScreen() } label: { heartTile }.buttonStyle(.plain)),
+            AnyView(storageTile),
+            AnyView(memoryTile),
+        ]
+        if link.vitals?.battery != nil { t.append(AnyView(batteryTile)) }
+        if let g = glance {
+            t += [AnyView(screenTimeTile(g)), AnyView(heartDayTile(g)), AnyView(uptimeTile(g)), AnyView(macTile(g))]
+            if !g.hungry.isEmpty { t.append(AnyView(hungryTile(g))) }
+        }
+        return t
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-                    NavigationLink { HeartScreen() } label: { heartTile }.buttonStyle(.plain)
-                    storageTile
-                    memoryTile
-                    if let g = glance {
-                        screenTimeTile(g)
-                        heartDayTile(g)
-                        uptimeTile(g)
-                        macTile(g)
-                        if !g.hungry.isEmpty { hungryTile(g) }
+                // a real grid: every tile in a row stretches to the tallest one, so edges line up
+                let all = tiles, n = columnCount
+                Grid(alignment: .topLeading, horizontalSpacing: 14, verticalSpacing: 14) {
+                    ForEach(Array(stride(from: 0, to: all.count, by: n)), id: \.self) { start in
+                        GridRow {
+                            ForEach(0..<n, id: \.self) { i in
+                                if start + i < all.count {
+                                    all[start + i].frame(maxHeight: .infinity, alignment: .top)
+                                } else {
+                                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                                }
+                            }
+                        }
                     }
-                    batteryTile
                 }
             }
             .padding(16)
@@ -72,7 +86,7 @@ struct HomeScreen: View {
     // MARK: Tiles
 
     private func tile<C: View>(_ title: String, _ symbol: String, tint: Color, action: (() -> Void)? = nil, @ViewBuilder _ content: () -> C) -> some View {
-        Card {
+        Card(fill: true) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label(title.uppercased(), systemImage: symbol).font(.caption.weight(.bold)).foregroundStyle(tint)
@@ -83,6 +97,7 @@ struct HomeScreen: View {
                     }
                 }
                 content()
+                Spacer(minLength: 0)
             }
         }
     }
