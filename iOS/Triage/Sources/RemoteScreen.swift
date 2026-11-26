@@ -159,7 +159,8 @@ struct RemoteScreen: View {
                                      zoom = min(max(zoom * scale, 1), 5)
                                      pan = zoom <= 1.01 ? .zero : CGSize(width: pan.width + translation.x, height: pan.height + translation.y)
                                  },
-                                 tapChrome: { if hsc == .regular { chrome.toggle() } })
+                                 tapChrome: { if hsc == .regular { chrome.toggle() } },
+                                 displaySwipe: { step in nextDisplay(step) })
             }
             .clipped()
         }
@@ -206,7 +207,7 @@ struct RemoteScreen: View {
     private var floatingBar: some View {
         VStack(spacing: 10) {
             if deckTab == "keys" {
-                MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in send([["k": "key", "key": k, "mods": m]]) }
+                MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in sendKey(k, m) }
                     .frame(width: 620, height: 250)
             }
             HStack(spacing: 8) {
@@ -262,14 +263,14 @@ struct RemoteScreen: View {
             .tint(.white)
             switch deckTab {
             case "keys":
-                MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in send([["k": "key", "key": k, "mods": m]]) }
+                MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in sendKey(k, m) }
             case "trackpad":
                 trackpad
                 HStack(spacing: 8) { clickButton("Click", "left"); clickButton("Right-click", "right") }.frame(height: 44)
             default:
                 GeometryReader { g in
                     VStack(spacing: 8) {
-                        MacKeyboard(mods: $mods, locked: $locked, showFRow: g.size.height > 420) { k, m in send([["k": "key", "key": k, "mods": m]]) }
+                        MacKeyboard(mods: $mods, locked: $locked, showFRow: g.size.height > 420) { k, m in sendKey(k, m) }
                             .frame(height: g.size.height * 0.58)
                         trackpad.padding(.horizontal, g.size.width * 0.18)    // centered, like a MacBook's
                     }
@@ -401,6 +402,16 @@ struct RemoteScreen: View {
 
     private func send(_ events: [[String: Any]]) { link.send("input", ["events": events]) }
 
+    /// F1–F12 do what the icons say (brightness, Mission Control, volume…) unless fn is held, like a MacBook.
+    private func sendKey(_ k: String, _ m: [String]) {
+        let isF = k.count <= 3 && k.hasPrefix("f") && Int(k.dropFirst()) != nil
+        if isF && !m.contains("fn") {
+            send([["k": "media", "key": k]])
+        } else {
+            send([["k": "key", "key": k, "mods": m.filter { $0 != "fn" }]])
+        }
+    }
+
     private func key(_ k: String) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         send([["k": "key", "key": k, "mods": takeMods()]])
@@ -430,6 +441,16 @@ struct RemoteScreen: View {
             _ = try? await link.call("screenStop")
             _ = try? await link.call("clipSync", ["on": false])
         }
+    }
+
+    /// Four-finger swipe on the picture: next or previous screen, with its name flashed so you know where you are.
+    private func nextDisplay(_ step: Int) {
+        let ids = displays.compactMap { $0["id"] as? Int }
+        guard ids.count > 1 else { frames.flash("Only one display"); return }
+        let i = ids.firstIndex(of: display ?? ids[0]) ?? 0
+        let next = ids[(i + step + ids.count) % ids.count]
+        frames.flash(displays.first { $0["id"] as? Int == next }?["name"] as? String ?? "Display")
+        switchDisplay(next)
     }
 
     private func switchDisplay(_ id: Int) {
@@ -516,6 +537,7 @@ struct InputSurfaceView: UIViewRepresentable {
     let normalize: (CGPoint) -> CGPoint?
     let pinch: ((CGFloat, CGPoint, Bool) -> Void)?
     let tapChrome: () -> Void
+    var displaySwipe: ((Int) -> Void)? = nil
 
     func makeUIView(context: Context) -> InputSurface { InputSurface() }
     func updateUIView(_ v: InputSurface, context: Context) {
@@ -526,6 +548,7 @@ struct InputSurfaceView: UIViewRepresentable {
         v.normalize = normalize
         v.onPinch = pinch
         v.onThreeTap = tapChrome
+        v.onDisplaySwipe = displaySwipe
     }
 }
 
@@ -565,7 +588,7 @@ final class InputSurface: UIView, UIGestureRecognizerDelegate {
         tap1.require(toFail: tap2)
         tap2.require(toFail: tap3)
         var swipes: [UIGestureRecognizer] = []
-        for (fingers, dirs) in [(3, [UISwipeGestureRecognizer.Direction.up, .down, .left, .right]), (4, [.down, .up])] {
+        for (fingers, dirs) in [(3, [UISwipeGestureRecognizer.Direction.up, .down, .left, .right]), (4, [.down, .up, .left, .right])] {
             for d in dirs {
                 let sw = UISwipeGestureRecognizer(target: self, action: #selector(swipe(_:)))
                 sw.numberOfTouchesRequired = fingers
@@ -639,7 +662,14 @@ final class InputSurface: UIView, UIGestureRecognizerDelegate {
     @objc private func tap3() { thunk.impactOccurred(); onThreeTap() }
 
     /// macOS trackpad gestures, sent as the shortcuts macOS maps them to.
+    var onDisplaySwipe: ((Int) -> Void)?
+
     @objc private func swipe(_ g: UISwipeGestureRecognizer) {
+        if g.numberOfTouchesRequired == 4 && (g.direction == .left || g.direction == .right) {
+            thunk.impactOccurred()
+            onDisplaySwipe?(g.direction == .left ? 1 : -1)
+            return
+        }
         guard mode == .trackpad else { return }
         thunk.impactOccurred()
         let key: (String, [String])

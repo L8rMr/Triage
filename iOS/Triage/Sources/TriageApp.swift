@@ -22,10 +22,10 @@ struct TriageRemoteApp: App {
             .tint(theme.palette.accent)
             .fontDesign(theme.palette.mono ? .monospaced : .default)
             .background(Color.glass900.ignoresSafeArea())
-            .onAppear { browser.start() }
+            .onAppear { browser.start(); fallBackToHost() }
             .onChange(of: scenePhase) { _, p in
                 switch p {
-                case .active: browser.start(); link.resume()
+                case .active: browser.start(); link.resume(); fallBackToHost()
                 case .background: link.suspend(); browser.stop()
                 default: break
                 }
@@ -35,6 +35,18 @@ struct TriageRemoteApp: App {
                 guard link.phase == .idle, let want = link.rememberedMac, let mac = macs.first(where: { $0.id == want }) else { return }
                 link.connect(mac)
             }
+        }
+    }
+}
+
+extension TriageRemoteApp {
+    /// Not on the Mac's Wi-Fi? If Bonjour hasn't found it after a moment, go the long way round (Tailscale).
+    func fallBackToHost() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            guard link.phase == .idle || { if case .failed = link.phase { return true }; return false }(),
+                  !link.remoteHost.isEmpty,
+                  !browser.macs.contains(where: { $0.id == link.rememberedMac }) else { return }
+            link.connect(host: link.remoteHost)
         }
     }
 }

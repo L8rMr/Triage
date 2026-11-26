@@ -206,6 +206,8 @@ enum RemoteInput {
                 ev.flags = f
                 ev.post(tap: .cghidEventTap)
             }
+        case "media":      // the Mac's F-row specials, like pressing them on a MacBook
+            media(e["key"] as? String ?? "")
         case "text":
             for ch in (e["s"] as? String) ?? "" {
                 if ch == "\n" { one(["k": "key", "key": "return"]); continue }
@@ -216,6 +218,38 @@ enum RemoteInput {
                     ev.post(tap: .cghidEventTap)
                 }
             }
+        default: break
+        }
+    }
+
+    /// NX_KEYTYPE_* system keys (volume, brightness, playback) go out as "system defined" events, the way a real keyboard sends them.
+    private static func systemKey(_ code: Int32) {
+        for down in [true, false] {
+            let flags = NSEvent.ModifierFlags(rawValue: down ? 0xa00 : 0xb00)
+            let data1 = Int((code << 16) | ((down ? 0xa : 0xb) << 8))
+            NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                               context: nil, subtype: 8, data1: data1, data2: -1)?.cgEvent?.post(tap: .cghidEventTap)
+        }
+    }
+
+    private static func rawKey(_ code: CGKeyCode) {
+        for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)?.post(tap: .cghidEventTap) }
+    }
+
+    private static func media(_ key: String) {
+        switch key {
+        case "f1": systemKey(3)              // brightness down
+        case "f2": systemKey(2)              // brightness up
+        case "f3": DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app")) }
+        case "f4": one(["k": "key", "key": "space", "mods": ["cmd"]])      // Spotlight
+        case "f5": rawKey(176)               // Dictation key
+        case "f6": rawKey(178)               // Do Not Disturb key
+        case "f7": systemKey(18)             // previous track
+        case "f8": systemKey(16)             // play / pause
+        case "f9": systemKey(17)             // next track
+        case "f10": systemKey(7)             // mute
+        case "f11": systemKey(1)             // volume down
+        case "f12": systemKey(0)             // volume up
         default: break
         }
     }

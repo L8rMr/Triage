@@ -6,6 +6,8 @@ struct ConnectView: View {
     @EnvironmentObject var link: MacLink
     @State private var code = ""
     @FocusState private var codeFocused: Bool
+    @State private var askHost = false
+    @State private var host = ""
 
     var body: some View {
         ScrollView {
@@ -82,6 +84,19 @@ struct ConnectView: View {
             }
             if browser.macs.isEmpty {
                 ProgressView().padding(.top, 8)
+            }
+            Button { host = link.remoteHost; askHost = true } label: {
+                Label("Away from home? Connect over Tailscale", systemImage: "globe")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.top, 10)
+            .alert("Connect over Tailscale", isPresented: $askHost) {
+                TextField("alens-macbook-air or 100.x.y.z", text: $host)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button("Connect") { link.remoteHost = host; link.connect(host: host) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your Mac's Tailscale name or address. Both devices need Tailscale on; the Mac must be awake with Triage open.")
             }
         }
     }

@@ -101,6 +101,22 @@ final class MacLink: ObservableObject {
 
     // MARK: Connect / disconnect
 
+    /// Away from home: the Mac's Tailscale name or IP (or any reachable address). Triage listens on port 52384.
+    @Published var remoteHost: String = UserDefaults.standard.string(forKey: "link.host") ?? "" {
+        didSet { UserDefaults.standard.set(remoteHost, forKey: "link.host") }
+    }
+
+    func connect(host: String) {
+        let h = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !h.isEmpty else { return }
+        let parts = h.split(separator: ":")
+        let port = parts.count == 2 ? UInt16(parts[1]) ?? 52384 : 52384
+        let name = String(parts.first ?? Substring(h))
+        connect(FoundMac(id: name, endpoint: .hostPort(host: NWEndpoint.Host(name), port: NWEndpoint.Port(rawValue: port)!)))
+    }
+
+    var viaInternet: Bool { if case .hostPort = target?.endpoint { return true }; return false }
+
     func connect(_ mac: FoundMac) {
         wantConnected = true
         target = mac
@@ -325,7 +341,7 @@ final class MacLink: ObservableObject {
                 self.mode = mode
                 self.phase = .ready
                 self.reconnecting = false
-                self.rememberedMac = name
+                if case .service = self.target?.endpoint { self.rememberedMac = name }
             }
             Task { _ = try? await self.call("subscribe", ["vitals": true]) }
         case "reply":

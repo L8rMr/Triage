@@ -17,13 +17,18 @@ struct MacKeyboard: View {
         var width: CGFloat = 1
         var mod: String? = nil
         var small = false
+        var symbol: String? = nil
     }
+
+    /// The MacBook top row: what each F-key does by default (hold fn for plain F1–F12).
+    static let fSymbols = ["sun.min", "sun.max", "rectangle.3.group", "magnifyingglass", "mic", "moon",
+                           "backward.fill", "playpause.fill", "forward.fill", "speaker.slash", "speaker.wave.1", "speaker.wave.3"]
 
     private var rows: [[K]] {
         var r: [[K]] = []
         if showFRow {
             r.append([K(label: "esc", key: "escape", width: 1.4, small: true)] +
-                     (1...12).map { K(label: "F\($0)", key: "f\($0)", small: true) })
+                     (1...12).map { K(label: "F\($0)", key: "f\($0)", small: true, symbol: Self.fSymbols[$0 - 1]) })
         }
         let num: [(String, String)] = [("`", "~"), ("1", "!"), ("2", "@"), ("3", "#"), ("4", "$"), ("5", "%"), ("6", "^"), ("7", "&"), ("8", "*"), ("9", "("), ("0", ")"), ("-", "_"), ("=", "+")]
         r.append(num.map { K(label: $0.0, shifted: $0.1, key: $0.0) } + [K(label: "delete", key: "delete", width: 1.5, small: true)])
@@ -125,7 +130,14 @@ struct MacKeyboard: View {
                 if !mods.isEmpty { mods = [] }
             } label: {
                 Group {
-                    if let s = k.shifted {
+                    if let sym = k.symbol {
+                        VStack(spacing: 1) {
+                            if !(mods.contains("fn") || locked.contains("fn")) {
+                                Image(systemName: sym).font(.system(size: max(9, h * 0.36), weight: .medium))
+                            }
+                            Text(k.label).font(.system(size: max(6, h * 0.2))).opacity(mods.contains("fn") || locked.contains("fn") ? 1 : 0.5)
+                        }
+                    } else if let s = k.shifted {
                         VStack(spacing: 0) {
                             Text(s).font(.system(size: max(8, h * 0.26))).opacity(shifted ? 1 : 0.55)
                             Text(k.label).font(.system(size: max(10, h * 0.32))).opacity(shifted ? 0.55 : 1)
