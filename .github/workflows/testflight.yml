@@ -48,6 +48,7 @@ jobs:
       - name: Archive
         working-directory: iOS
         run: |
+          BUILD=$(TZ=America/New_York date +%Y%m%d%H%M)   # same scheme as Upload to TestFlight.command, so they never collide
           xcodebuild archive \
             -project TriageRemote.xcodeproj -scheme Triage \
             -destination 'generic/platform=iOS' \
@@ -57,7 +58,7 @@ jobs:
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" | tail -n 40
+            CURRENT_PROJECT_VERSION="$BUILD" | tail -n 40
 
       - name: Upload to TestFlight
         working-directory: iOS
@@ -70,4 +71,4 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
-          echo "Build ${{ github.run_number }} is on its way to TestFlight." >> "$GITHUB_STEP_SUMMARY"
+          echo "A new build is on its way to TestFlight." >> "$GITHUB_STEP_SUMMARY"
