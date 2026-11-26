@@ -265,7 +265,9 @@ final class RemoteServer: ObservableObject {
         let id = s.id
         ScreenShare.shared.onFrame = { [weak self] frame in
             guard let self else { return }
-            self.queue.async { self.sessions[id]?.pushBinary(frame) }
+            self.queue.async {
+                if self.sessions[id]?.pushBinary(frame) == false && frame.first == 0x56 { ScreenShare.shared.requestKeyframe() }
+            }
         }
         DispatchQueue.main.async {
             if self.watchingSession != id { self.record(s.deviceName, "Started remote desktop") }
@@ -466,8 +468,11 @@ final class RemoteSession {
     func push(_ type: String, _ body: [String: Any]) { sendSecure(["t": type, "body": body]) }
 
     /// Screen frames: sealed raw bytes, at most two on the wire, so a slow moment drops frames instead of building lag.
-    func pushBinary(_ payload: Data) {       // on queue
-        guard let key, !closed, framesInFlight < 2, let box = try? ChaChaPoly.seal(payload, using: key) else { return }
+    /// Returns false when the frame was dropped (link busy): video then needs a fresh keyframe.
+    @discardableResult
+    func pushBinary(_ payload: Data) -> Bool {       // on queue
+        let limit = payload.first == 0x56 ? 5 : 2       // video frames are small; JPEGs aren't
+        guard let key, !closed, framesInFlight < limit, let box = try? ChaChaPoly.seal(payload, using: key) else { return false }
         framesInFlight += 1
         let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
         let ctx = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
@@ -475,6 +480,7 @@ final class RemoteSession {
             guard let self else { return }
             self.server.queue.async { self.framesInFlight = max(0, self.framesInFlight - 1) }
         })
+        return true
     }
 
     // MARK: Handshake

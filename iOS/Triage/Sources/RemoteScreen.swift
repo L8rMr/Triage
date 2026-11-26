@@ -1,26 +1,119 @@
 import SwiftUI
 import UIKit
+import AVFoundation
+import CoreMedia
 
 // MARK: - Frames from the Mac
 
-/// Decodes the newest frame off the main thread and drops any that arrive while it's busy, so what you see is
-/// always the latest picture, never a backlog.
+/// Two kinds of picture arrive: hardware video ("V", HEVC/H.264) decoded by the phone's media engine straight onto a
+/// display layer, or JPEGs ("F") from older Macs. Video frames never touch the main thread.
 final class RemoteFrames: ObservableObject {
     static let shared = RemoteFrames()
     @Published private(set) var image: UIImage?
+    @Published private(set) var videoSize: CGSize?
     @Published var note: String?
     @Published var ended = false
+    /// Fires when the decoder lost its place and needs a fresh full picture from the Mac.
+    var needKeyframe: () -> Void = {}
+
+    let layer: AVSampleBufferDisplayLayer = {
+        let l = AVSampleBufferDisplayLayer()
+        l.videoGravity = .resizeAspect
+        l.backgroundColor = UIColor.black.cgColor
+        return l
+    }()
     private let q = DispatchQueue(label: "triage.frames", qos: .userInteractive)
     private var busy = false
     private let lock = NSLock()
+    private var format: CMVideoFormatDescription?
+    private var waitingForKey = true
 
     func receive(_ data: Data) {
+        if data.first == 0x56 { q.async { self.video(data) }; return }
         lock.lock(); if busy { lock.unlock(); return }; busy = true; lock.unlock()
         q.async {
             defer { self.lock.lock(); self.busy = false; self.lock.unlock() }
             guard data.count > 5, let img = UIImage(data: data.subdata(in: 5..<data.count))?.preparingForDisplay() else { return }
-            DispatchQueue.main.async { self.image = img }
+            DispatchQueue.main.async { self.image = img; self.videoSize = nil }
         }
+    }
+
+    private func video(_ d: Data) {          // on q
+        guard d.count > 4 else { return }
+        let hevc = d[d.startIndex + 1] == 1, key = d[d.startIndex + 2] == 1
+        var i = d.startIndex + 3
+        if key {
+            let n = Int(d[i]); i += 1
+            var sets: [Data] = []
+            for _ in 0..<n {
+                guard i + 2 <= d.endIndex else { return }
+                let len = Int(d[i]) << 8 | Int(d[i + 1]); i += 2
+                guard i + len <= d.endIndex else { return }
+                sets.append(d.subdata(in: i..<(i + len))); i += len
+            }
+            if let f = Self.makeFormat(sets, hevc: hevc) {
+                format = f
+                let dims = CMVideoFormatDescriptionGetDimensions(f)
+                let size = CGSize(width: Int(dims.width), height: Int(dims.height))
+                DispatchQueue.main.async { if self.videoSize != size { self.videoSize = size }; if self.image != nil { self.image = nil } }
+            }
+            waitingForKey = false
+        }
+        guard !waitingForKey, let format else { return }
+        let body = d.subdata(in: i..<d.endIndex)
+        guard let sb = Self.makeSample(body, format: format) else { return }
+        let r = layer.sampleBufferRenderer
+        if r.status == .failed {
+            r.flush()
+            waitingForKey = true
+            needKeyframe()
+            return
+        }
+        r.enqueue(sb)
+    }
+
+    static func makeFormat(_ sets: [Data], hevc: Bool) -> CMVideoFormatDescription? {
+        guard !sets.isEmpty else { return nil }
+        let ptrs = sets.map { s -> UnsafeMutablePointer<UInt8> in
+            let p = UnsafeMutablePointer<UInt8>.allocate(capacity: s.count)
+            s.copyBytes(to: p, count: s.count)
+            return p
+        }
+        defer { ptrs.forEach { $0.deallocate() } }
+        let cptrs = ptrs.map { UnsafePointer($0) }
+        let sizes = sets.map(\.count)
+        var f: CMVideoFormatDescription?
+        let st = cptrs.withUnsafeBufferPointer { pp in
+            sizes.withUnsafeBufferPointer { ss in
+                hevc
+                    ? CMVideoFormatDescriptionCreateFromHEVCParameterSets(allocator: kCFAllocatorDefault, parameterSetCount: sets.count,
+                                                                          parameterSetPointers: pp.baseAddress!, parameterSetSizes: ss.baseAddress!,
+                                                                          nalUnitHeaderLength: 4, extensions: nil, formatDescriptionOut: &f)
+                    : CMVideoFormatDescriptionCreateFromH264ParameterSets(allocator: kCFAllocatorDefault, parameterSetCount: sets.count,
+                                                                          parameterSetPointers: pp.baseAddress!, parameterSetSizes: ss.baseAddress!,
+                                                                          nalUnitHeaderLength: 4, formatDescriptionOut: &f)
+            }
+        }
+        return st == noErr ? f : nil
+    }
+
+    static func makeSample(_ body: Data, format: CMVideoFormatDescription) -> CMSampleBuffer? {
+        var bb: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: body.count,
+                                                 blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+                                                 dataLength: body.count, flags: 0, blockBufferOut: &bb) == noErr, let bb else { return nil }
+        body.withUnsafeBytes { raw in _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: bb, offsetIntoDestination: 0, dataLength: body.count) }
+        var sb: CMSampleBuffer?
+        var size = body.count
+        guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: bb, formatDescription: format, sampleCount: 1,
+                                        sampleTimingEntryCount: 0, sampleTimingArray: nil, sampleSizeEntryCount: 1,
+                                        sampleSizeArray: &size, sampleBufferOut: &sb) == noErr, let sb else { return nil }
+        if let att = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true), CFArrayGetCount(att) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(att, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        return sb
     }
 
     func flash(_ s: String) {
@@ -30,17 +123,43 @@ final class RemoteFrames: ObservableObject {
         }
     }
 
-    func reset() { image = nil; ended = false }
+    func reset() {
+        image = nil; videoSize = nil; ended = false
+        q.async { self.format = nil; self.waitingForKey = true; self.layer.sampleBufferRenderer.flush(removingDisplayedImage: true) {} }
+    }
+}
+
+/// Hosts the shared display layer.
+struct VideoLayerView: UIViewRepresentable {
+    final class Host: UIView {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            RemoteFrames.shared.layer.frame = bounds
+            CATransaction.commit()
+        }
+    }
+    func makeUIView(context: Context) -> Host {
+        let v = Host()
+        v.backgroundColor = .black
+        RemoteFrames.shared.layer.removeFromSuperlayer()
+        v.layer.addSublayer(RemoteFrames.shared.layer)
+        return v
+    }
+    func updateUIView(_ v: Host, context: Context) {
+        if RemoteFrames.shared.layer.superlayer !== v.layer { v.layer.addSublayer(RemoteFrames.shared.layer) }
+    }
 }
 
 // MARK: - Settings shared with the Settings screen
 
 enum RemotePrefs {
-    static var stream: (fps: Int, quality: Double, maxWidth: Int) {
+    /// Hardware video bitrates: Fastest fits a so-so connection, Sharpest wants good Wi-Fi.
+    static var stream: (fps: Int, quality: Double, maxWidth: Int, bitrate: Int) {
         switch UserDefaults.standard.string(forKey: "remote.quality") ?? "balanced" {
-        case "fast": return (60, 0.4, 1280)
-        case "sharp": return (30, 0.72, 2600)
-        default: return (45, 0.55, 1800)
+        case "fast": return (60, 0.4, 1600, 4_000_000)
+        case "sharp": return (60, 0.72, 2940, 16_000_000)
+        default: return (60, 0.55, 2200, 8_000_000)
         }
     }
 }
@@ -147,10 +266,16 @@ struct RemoteScreen: View {
     private var screen: some View {
         GeometryReader { g in
             let img = frames.image
-            let fitted = Self.fit(img?.size ?? CGSize(width: 16, height: 10), in: g.size)
+            let fitted = Self.fit(frames.videoSize ?? img?.size ?? CGSize(width: 16, height: 10), in: g.size)
             ZStack {
                 Color.black
-                if let img {
+                if frames.videoSize != nil {
+                    VideoLayerView()
+                        .frame(width: fitted.width, height: fitted.height)
+                        .position(x: fitted.midX, y: fitted.midY)
+                        .scaleEffect(zoom, anchor: .center)
+                        .offset(pan)
+                } else if let img {
                     Image(uiImage: img)
                         .resizable()
                         .interpolation(.medium)
@@ -405,7 +530,7 @@ struct RemoteScreen: View {
             .padding(24)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .padding(30)
-        } else if starting && frames.image == nil {
+        } else if starting && frames.image == nil && frames.videoSize == nil {
             VStack(spacing: 10) {
                 ProgressView().tint(.white)
                 Text("Connecting to \(link.macName)'s screen…").font(.footnote).foregroundStyle(.white.opacity(0.8))
@@ -448,7 +573,8 @@ struct RemoteScreen: View {
         starting = true
         frames.reset()
         let p = RemotePrefs.stream
-        var args: [String: Any] = ["fps": p.fps, "quality": p.quality, "maxWidth": p.maxWidth]
+        frames.needKeyframe = { [link] in link.send("keyframe", [:]) }
+        var args: [String: Any] = ["fps": p.fps, "quality": p.quality, "maxWidth": p.maxWidth, "codec": "hevc", "bitrate": p.bitrate]
         if let display { args["display"] = display }
         do {
             let d = try await link.call("screenStart", args)

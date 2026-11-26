@@ -5,6 +5,7 @@ import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 import ApplicationServices
+import VideoToolbox
 
 // MARK: - Remote desktop: the screen out, the mouse and keyboard in
 //
@@ -23,6 +24,10 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
     /// Hands a finished frame (already JPEG) to whoever is watching.
     var onFrame: ((Data) -> Void)?
     private(set) var running = false
+    private var encoder: VideoEncoder?
+    private var lastPB: CVPixelBuffer?
+    private var lastPTS = CMTime.zero
+    private(set) var codecName = "jpeg"
 
     static var displays: [[String: Any]] {
         NSScreen.screens.compactMap { s in
@@ -33,7 +38,7 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    func start(display: CGDirectDisplayID?, fps: Int, maxWidth: Int, quality: CGFloat) async throws {
+    func start(display: CGDirectDisplayID?, fps: Int, maxWidth: Int, quality: CGFloat, codec: String = "jpeg", bitrate: Int = 6_000_000) async throws {
         guard CGPreflightScreenCaptureAccess() else {
             _ = CGRequestScreenCaptureAccess()
             throw RemoteError(message: "Allow Triage under Screen Recording on the Mac (System Settings › Privacy & Security), then try again.")
@@ -52,9 +57,23 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
         cfg.height = max(200, Int(CGFloat(d.height * 2) * scale))
         cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(min(max(fps, 5), 60)))
         cfg.showsCursor = true
-        cfg.queueDepth = 3
-        cfg.pixelFormat = kCVPixelFormatType_32BGRA
+        cfg.queueDepth = 4
+        // video wants YUV straight from the GPU (no conversion); JPEG wants BGRA
+        cfg.pixelFormat = codec == "jpeg" ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        cfg.colorSpaceName = CGColorSpace.sRGB
         cfg.capturesAudio = false
+        // Hardware video: the Mac's media engine compresses each change into a few KB, instead of a whole JPEG.
+        q.sync {
+            encoder = nil; lastPB = nil
+            if codec != "jpeg", let e = VideoEncoder(width: Int32(cfg.width), height: Int32(cfg.height), fps: min(max(fps, 5), 60),
+                                                     bitrate: bitrate, preferHEVC: codec == "hevc") {
+                e.output = { [weak self] d in self?.onFrame?(d) }
+                encoder = e
+                codecName = e.isHEVC ? "hevc" : "h264"
+            } else {
+                codecName = "jpeg"
+            }
+        }
         let filter = SCContentFilter(display: d, excludingWindows: [])
         let s = SCStream(filter: filter, configuration: cfg, delegate: self)
         try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: q)
@@ -65,7 +84,25 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stop() { Task { await stopAsync() } }
 
+    /// A frame went missing on the way (or the phone just joined): send a fresh full picture.
+    private var lastKeyRequest = Date.distantPast
+
+    func requestKeyframe() {
+        q.async {
+            guard let e = self.encoder else { return }
+            e.forceKey = true
+            // a busy link drops frames in bursts: one fresh picture per quarter second is plenty
+            guard Date().timeIntervalSince(self.lastKeyRequest) > 0.25 else { return }
+            self.lastKeyRequest = Date()
+            if let pb = self.lastPB {      // the screen may be still, so re-send the last picture right away
+                self.lastPTS = CMTimeAdd(self.lastPTS, CMTime(value: 1, timescale: 1000))
+                e.encode(pb, pts: self.lastPTS)
+            }
+        }
+    }
+
     private func stopAsync() async {
+        q.sync { encoder?.invalidate(); encoder = nil; lastPB = nil }
         guard let s = stream else { return }
         stream = nil
         running = false
@@ -81,6 +118,12 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
         guard type == .screen, let pb = sb.imageBuffer,
               let info = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = info.first?[.status] as? Int, raw == SCFrameStatus.complete.rawValue else { return }
+        if let e = encoder {
+            lastPB = pb
+            lastPTS = sb.presentationTimeStamp
+            e.encode(pb, pts: lastPTS)
+            return
+        }
         let img = CIImage(cvPixelBuffer: pb)
         guard let cg = ci.createCGImage(img, from: img.extent) else { return }
         let out = NSMutableData()
@@ -105,6 +148,98 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
         let cg = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: d, excludingWindows: []), configuration: cfg)
         let rep = NSBitmapImageRep(cgImage: cg)
         return rep.representation(using: .png, properties: [:]) ?? Data()
+    }
+}
+
+// MARK: - Hardware video encoder
+
+/// VideoToolbox in low-latency real-time mode: no B-frames, no lookahead, every frame out as soon as it's encoded.
+/// Wire format per frame: "V", codec (1 = HEVC, 0 = H.264), keyframe flag, [parameter sets on keyframes], length-prefixed NAL units.
+final class VideoEncoder {
+    private var session: VTCompressionSession?
+    let isHEVC: Bool
+    var forceKey = true
+    var output: ((Data) -> Void)?
+
+    init?(width: Int32, height: Int32, fps: Int, bitrate: Int, preferHEVC: Bool) {
+        var made: VTCompressionSession?
+        var hevc = false
+        for codec in (preferHEVC ? [kCMVideoCodecType_HEVC, kCMVideoCodecType_H264] : [kCMVideoCodecType_H264]) {
+            let spec = [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true,
+                        kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true] as CFDictionary
+            var s: VTCompressionSession?
+            if VTCompressionSessionCreate(allocator: nil, width: width, height: height, codecType: codec, encoderSpecification: spec,
+                                          imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil, refcon: nil,
+                                          compressionSessionOut: &s) == noErr, let s {
+                made = s; hevc = codec == kCMVideoCodecType_HEVC; break
+            }
+        }
+        guard let s = made else { return nil }
+        session = s
+        isHEVC = hevc
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel,
+                             value: hevc ? kVTProfileLevel_HEVC_Main_AutoLevel : kVTProfileLevel_H264_High_AutoLevel)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (fps * 5) as CFNumber)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 5 as CFNumber)
+        VTCompressionSessionPrepareToEncodeFrames(s)
+    }
+
+    func invalidate() {
+        if let s = session { VTCompressionSessionInvalidate(s) }
+        session = nil
+    }
+
+    func encode(_ pb: CVPixelBuffer, pts: CMTime) {
+        guard let s = session else { return }
+        let props: CFDictionary? = forceKey ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
+        forceKey = false
+        VTCompressionSessionEncodeFrame(s, imageBuffer: pb, presentationTimeStamp: pts, duration: .invalid,
+                                        frameProperties: props, infoFlagsOut: nil) { [weak self] status, _, sb in
+            guard status == noErr, let sb, let self else { return }
+            self.package(sb)
+        }
+    }
+
+    private func package(_ sb: CMSampleBuffer) {
+        let att = (CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[CFString: Any]])?.first
+        let key = !((att?[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
+        var out = Data([0x56, isHEVC ? 1 : 0, key ? 1 : 0])
+        if key, let fmt = CMSampleBufferGetFormatDescription(sb) {
+            var count = 0
+            if isHEVC {
+                CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(fmt, parameterSetIndex: 0, parameterSetPointerOut: nil, parameterSetSizeOut: nil,
+                                                                   parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil)
+            } else {
+                CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, parameterSetIndex: 0, parameterSetPointerOut: nil, parameterSetSizeOut: nil,
+                                                                   parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil)
+            }
+            out.append(UInt8(count))
+            for i in 0..<count {
+                var ptr: UnsafePointer<UInt8>?
+                var size = 0
+                if isHEVC {
+                    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(fmt, parameterSetIndex: i, parameterSetPointerOut: &ptr, parameterSetSizeOut: &size,
+                                                                       parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
+                } else {
+                    CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, parameterSetIndex: i, parameterSetPointerOut: &ptr, parameterSetSizeOut: &size,
+                                                                       parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
+                }
+                guard let ptr else { continue }
+                out.append(UInt8(size >> 8)); out.append(UInt8(size & 0xFF))
+                out.append(ptr, count: size)
+            }
+        }
+        guard let bb = CMSampleBufferGetDataBuffer(sb) else { return }
+        let len = CMBlockBufferGetDataLength(bb)
+        var body = Data(count: len)
+        body.withUnsafeMutableBytes { raw in
+            _ = CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: raw.baseAddress!)
+        }
+        output?(out + body)
     }
 }
 
@@ -274,7 +409,7 @@ enum RemoteInput {
 // MARK: - Ops
 
 extension RemoteAPI {
-    static let desktopOps: Set<String> = ["screenStart", "screenStop", "displays", "screenshot", "runningApps", "activate",
+    static let desktopOps: Set<String> = ["screenStart", "screenStop", "keyframe", "displays", "screenshot", "runningApps", "activate",
                                           "launchables", "launch", "clipSync", "pasteOnMac"]
 
     static func desktop(_ op: String, _ a: [String: Any], _ s: RemoteSession, _ done: @escaping Done) -> Bool {
@@ -291,15 +426,19 @@ extension RemoteAPI {
             Task {
                 do {
                     try await ScreenShare.shared.start(display: id, fps: a["fps"] as? Int ?? 30, maxWidth: a["maxWidth"] as? Int ?? 1600,
-                                                       quality: CGFloat(a["quality"] as? Double ?? 0.55))
+                                                       quality: CGFloat(a["quality"] as? Double ?? 0.55),
+                                                       codec: a["codec"] as? String ?? "jpeg", bitrate: a["bitrate"] as? Int ?? 6_000_000)
                     RemoteServer.shared.startWatching(s)
                     let b = CGDisplayBounds(ScreenShare.shared.displayID)
-                    done(.success(["display": Int(ScreenShare.shared.displayID), "w": b.width, "h": b.height,
+                    done(.success(["display": Int(ScreenShare.shared.displayID), "w": b.width, "h": b.height, "codec": ScreenShare.shared.codecName,
                                    "input": RemoteInput.trusted]))
                 } catch {
                     done(.failure((error as? RemoteError) ?? RemoteError(message: error.localizedDescription)))
                 }
             }
+        case "keyframe":
+            ScreenShare.shared.requestKeyframe()
+            done(.success([:]))
         case "screenStop":
             RemoteServer.shared.stopWatching(s)
             done(.success([:]))
