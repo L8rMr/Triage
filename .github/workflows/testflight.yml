@@ -15,7 +15,7 @@ jobs:
     runs-on: xcode-27   # GitHub image with the Xcode 27 toolchain (needed for full-screen iPhone Duo)
     timeout-minutes: 45
     env:
-      DEVELOPMENT_TEAM: 5ZC843A2XK
+      DEVELOPMENT_TEAM: 5ZC643A2XK
     steps:
       - uses: actions/checkout@v4
 
