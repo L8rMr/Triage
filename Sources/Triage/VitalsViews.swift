@@ -391,16 +391,17 @@ struct MenuBarLabel: View {
     @ObservedObject var monitor: SystemMonitor
     @AppStorage("bar.items") private var items = "heart"
     @AppStorage("bar.icon") private var showIcon = true
+    @ObservedObject private var remote = RemoteServer.shared
 
     var body: some View {
         let text = MenuBarText.compose(monitor, items: items, icon: showIcon)
         // the menu bar drops images that sit inside Text, so draw heart + reading as one template image
-        Image(nsImage: MenuBarImage.make(icon: showIcon || text.isEmpty, text: text))
+        Image(nsImage: MenuBarImage.make(icon: showIcon || text.isEmpty, text: text, phone: !remote.connected.isEmpty))
     }
 }
 
 enum MenuBarImage {
-    static func make(icon: Bool, text: String) -> NSImage {
+    static func make(icon: Bool, text: String, phone: Bool = false) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let t = text as NSString
@@ -409,10 +410,16 @@ enum MenuBarImage {
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold)) : nil
         let hs = heart?.size ?? .zero
         let gap: CGFloat = heart != nil && !text.isEmpty ? 4 : 0
-        let size = NSSize(width: ceil(hs.width + gap + ts.width), height: 18)
+        // a paired iPhone is looking: say so right in the menu bar
+        let iphone = phone ? NSImage(systemSymbolName: "iphone.gen3", accessibilityDescription: "iPhone connected")?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) : nil
+        let ps = iphone?.size ?? .zero
+        let pgap: CGFloat = iphone != nil ? 5 : 0
+        let size = NSSize(width: ceil(hs.width + gap + ts.width + pgap + ps.width), height: 18)
         let img = NSImage(size: size, flipped: false) { _ in
             if let heart { heart.draw(in: NSRect(x: 0, y: (18 - hs.height) / 2, width: hs.width, height: hs.height)) }
             if !text.isEmpty { t.draw(at: NSPoint(x: hs.width + gap, y: (18 - ts.height) / 2), withAttributes: attrs) }
+            if let iphone { iphone.draw(in: NSRect(x: hs.width + gap + ts.width + pgap, y: (18 - ps.height) / 2, width: ps.width, height: ps.height)) }
             return true
         }
         img.isTemplate = true   // the menu bar tints it for light, dark and highlighted

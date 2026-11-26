@@ -51,7 +51,7 @@ final class SystemMonitor: ObservableObject {
     private var tickCount2 = 0
     private func tick() {
         tickCount2 &+= 1
-        let showing = AppVisibility.anythingShowing
+        let showing = AppVisibility.anythingShowing || RemoteServer.watching
         let d = UserDefaults.standard
         schedule(showing ? (d.object(forKey: "heart.rate") as? Double ?? 1.5) : (d.object(forKey: "heart.bgrate") as? Double ?? 5))
         PerfLog.shared.tick()

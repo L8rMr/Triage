@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKey.shared.register()
         RuleStore.shared.start()
         ClipboardStore.shared.start()
+        RemoteServer.shared.start()   // iPhone companion (off until turned on in Settings)
         // ⌘⇧2: grab text from anywhere on screen · ⌥⇧V: clipboard history
         HotKey.shared.register(id: 2, keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey)) {
             ClipboardStore.shared.captureScreenText()

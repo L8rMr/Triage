@@ -29,5 +29,7 @@
     <key>NSBluetoothAlwaysUsageDescription</key><string>Triage shows your Bluetooth devices, lets you connect them in one click, and shows their battery levels.</string>
     <key>NSAudioCaptureUsageDescription</key><string>Triage sets each app's volume by routing its sound through a private mixer. Nothing is recorded or saved.</string>
     <key>NSAppleEventsUsageDescription</key><string>Triage asks Finder to empty the Trash when you tell it to.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Triage lets your paired iPhone see this Mac's vitals and files over your Wi-Fi.</string>
+    <key>NSBonjourServices</key><array><string>_triage._tcp</string></array>
 </dict>
 </plist>

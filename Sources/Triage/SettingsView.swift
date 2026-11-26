@@ -4,7 +4,7 @@ import ServiceManagement
 
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case appearance = "Appearance", general = "General", menubar = "Menu Bar", heart = "Heart & Readings"
+        case appearance = "Appearance", general = "General", menubar = "Menu Bar", heart = "Heart & Readings", iphone = "iPhone"
         case files = "Files", privacy = "Privacy & Permissions", shortcuts = "Shortcuts", advanced = "Advanced"
         var id: String { rawValue }
         var symbol: String {
@@ -13,6 +13,7 @@ struct SettingsView: View {
             case .general: return "gearshape.fill"
             case .menubar: return "menubar.rectangle"
             case .heart: return "heart.fill"
+            case .iphone: return "iphone.gen3"
             case .files: return "folder.fill"
             case .privacy: return "hand.raised.fill"
             case .shortcuts: return "command"
@@ -25,6 +26,7 @@ struct SettingsView: View {
             case .general: return Color(hex6: 0x8E8E93)
             case .menubar: return Color(hex6: 0x0A84FF)
             case .heart: return Color(hex6: 0xFF375F)
+            case .iphone: return Color(hex6: 0x30D158)
             case .files: return Color(hex6: 0x64D2FF)
             case .privacy: return Color(hex6: 0x636366)
             case .shortcuts: return Color(hex6: 0xAC8E68)
@@ -77,6 +79,7 @@ struct SettingsView: View {
         case .general: GeneralPage()
         case .menubar: MenuBarPage()
         case .heart: HeartPage()
+        case .iphone: IPhonePage()
         case .files: FilesPage()
         case .privacy: PermissionsView(firstRun: false)
         case .shortcuts: ShortcutsPage()
@@ -281,6 +284,44 @@ private struct HeartPage: View {
                 ThemeSegments(selection: $bgRate, options: [(5.0, "5 s"), (15.0, "15 s"), (60.0, "60 s")]).frame(width: 220.d)
             }
             Row(title: "Still heart line", hint: "Same as Reduce motion in Appearance") { Toggle("", isOn: $store.reduceMotion).labelsHidden().toggleStyle(.switch) }
+        }
+    }
+}
+
+private struct IPhonePage: View {
+    @ObservedObject private var remote = RemoteServer.shared
+
+    var body: some View {
+        PageHeader(title: "iPhone", subtitle: "Check on this Mac from your iPhone over Wi-Fi: vitals, files, apps. Everything stays on your network, encrypted end to end.")
+        Group_(title: "Remote access") {
+            Row(title: "Your iPhone can", hint: remote.mode == .full ? "Quit apps and move files to the Trash. Every action is logged below."
+                    : remote.mode == .view ? "Look, but not touch" : "Nothing: Triage isn't listening") {
+                ThemeSegments(selection: Binding(get: { remote.mode.rawValue }, set: { remote.mode = RemoteMode(rawValue: $0) ?? .off }),
+                              options: RemoteMode.allCases.map { ($0.rawValue, $0.title) }).frame(width: 320.d)
+            }
+            Row(title: "Status", hint: remote.keepAwake ? "Kept awake from the iPhone" : nil) {
+                HStack(spacing: 6) {
+                    Circle().fill(remote.listening ? (remote.connected.isEmpty ? Color.orange : Color.green) : Color.secondary).frame(width: 8, height: 8)
+                    Text(remote.status).font(.ui(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        Group_(title: "Paired iPhones") {
+            if remote.devices.isEmpty {
+                Row(title: "None yet", hint: "Open Triage on your iPhone. This Mac shows a 6-digit code to type in.") { EmptyView() }
+            }
+            ForEach(remote.devices) { d in
+                Row(title: d.name, hint: "Paired \(d.paired.formatted(date: .abbreviated, time: .omitted))"
+                        + (d.lastSeen.map { " · last seen \($0.formatted(.relative(presentation: .named)))" } ?? "")) {
+                    Button("Forget") { remote.forget(d) }
+                }
+            }
+        }
+        Group_(title: "Activity") {
+            if remote.log.isEmpty { Row(title: "Nothing yet") { EmptyView() } }
+            ForEach(remote.log.prefix(40)) { e in
+                Row(title: e.action, hint: "\(e.device) · \(e.t.formatted(date: .abbreviated, time: .shortened))") { EmptyView() }
+            }
         }
     }
 }

@@ -1,0 +1,74 @@
+name: iPhone app → TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths: ["iOS/**", ".github/workflows/testflight.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: true
+
+jobs:
+  testflight:
+    runs-on: xcode-27   # GitHub image with the Xcode 27 toolchain (needed for full-screen iPhone Duo)
+    timeout-minutes: 45
+    env:
+      DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the newest Xcode (27.1+ fills the whole iPhone Duo screen)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Check the secrets are set
+        run: |
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            if [ -z "${!v}" ]; then echo "::error::Missing repo secret $v (Settings › Secrets and variables › Actions)"; exit 1; fi
+          done
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+
+      - name: Generate the Xcode project
+        working-directory: iOS
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: App Store Connect key
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "${{ secrets.ASC_KEY_P8 }}" > "$RUNNER_TEMP/keys/AuthKey.p8"
+
+      - name: Archive
+        working-directory: iOS
+        run: |
+          xcodebuild archive \
+            -project TriageRemote.xcodeproj -scheme Triage \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Triage.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" | tail -n 40
+
+      - name: Upload to TestFlight
+        working-directory: iOS
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Triage.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
+          echo "Build ${{ github.run_number }} is on its way to TestFlight." >> "$GITHUB_STEP_SUMMARY"

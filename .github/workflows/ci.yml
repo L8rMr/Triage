@@ -1,0 +1,33 @@
+name: Build check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    name: Mac app compiles
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
+      - run: swift build -c release 2>&1 | grep -E "error|warning: unre|Compiling|Build complete" | tail -n 60; exit ${PIPESTATUS[0]}
+
+  iphone:
+    name: iPhone app compiles
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
+      - working-directory: iOS
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          set -o pipefail
+          xcodebuild build -project TriageRemote.xcodeproj -scheme Triage \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO 2>&1 \
+            | grep -E "error:|warning:|BUILD" | tail -n 80
