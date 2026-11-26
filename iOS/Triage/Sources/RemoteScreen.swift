@@ -56,6 +56,8 @@ struct RemoteScreen: View {
     @AppStorage("remote.sensitivity") private var sensitivity = 1.6
     @AppStorage("remote.deck") private var deckTab = "both"
     @AppStorage("remote.clipAuto") private var clipAuto = true
+    @AppStorage("remote.compactFull") private var compactFull = false
+    @Environment(\.verticalSizeClass) private var vsc
 
     @State private var starting = true
     @State private var error: String?
@@ -66,6 +68,7 @@ struct RemoteScreen: View {
     @State private var locked: Set<String> = []
     @State private var typing = false
     @State private var showApps = false
+    @State private var showShortcuts = false
     @State private var chrome = true
     @State private var zoom: CGFloat = 1
     @State private var pan: CGSize = .zero
@@ -83,11 +86,18 @@ struct RemoteScreen: View {
                         Color.black.frame(height: fold.height)
                         deck(compact: true).frame(maxHeight: .infinity)
                     }
-                } else if hsc == .regular {
+                } else if fullScreen {
                     // Fully open: the whole inner display is the Mac. Controls float and fade away.
                     ZStack(alignment: .bottom) {
                         screen
-                        if chrome { floatingBar.padding(.bottom, 12).transition(.move(edge: .bottom).combined(with: .opacity)) }
+                        if chrome {
+                            floatingBar.padding(.bottom, 12).transition(.move(edge: .bottom).combined(with: .opacity))
+                        } else {
+                            Button { chrome = true } label: {
+                                Capsule().fill(.white.opacity(0.35)).frame(width: 64, height: 6).padding(14)
+                            }
+                            .accessibilityLabel("Show controls")
+                        }
                     }
                 } else {
                     // Closed (or a regular iPhone): screen up top, controls below.
@@ -100,8 +110,8 @@ struct RemoteScreen: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .background(Color.black)
-        .ignoresSafeArea(.container, edges: hsc == .regular ? .all : [])
-        .statusBarHidden(hsc == .regular)
+        .ignoresSafeArea(.container, edges: fullScreen ? .all : [])
+        .statusBarHidden(fullScreen)
         .toolbar(.hidden, for: .tabBar)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .top) { topBar }
@@ -121,6 +131,9 @@ struct RemoteScreen: View {
         .onChange(of: frames.ended) { _, e in if e { exit() } }
         .persistentSystemOverlays(.hidden)
     }
+
+    /// Open Duo, a phone held sideways, or the closed phone with Full screen picked: the Mac edge to edge.
+    private var fullScreen: Bool { hsc == .regular || vsc == .compact || compactFull }
 
     static func fold(_ proxy: GeometryProxy) -> CGRect? {
         if #available(iOS 27.1, *) {
@@ -159,7 +172,7 @@ struct RemoteScreen: View {
                                      zoom = min(max(zoom * scale, 1), 5)
                                      pan = zoom <= 1.01 ? .zero : CGSize(width: pan.width + translation.x, height: pan.height + translation.y)
                                  },
-                                 tapChrome: { if hsc == .regular { chrome.toggle() } },
+                                 tapChrome: { if fullScreen { chrome.toggle() } },
                                  displaySwipe: { step in nextDisplay(step) })
             }
             .clipped()
@@ -179,6 +192,14 @@ struct RemoteScreen: View {
             Button { exit() } label: { Image(systemName: "xmark").font(.headline).frame(width: 36, height: 36) }
                 .background(.ultraThinMaterial, in: Circle())
             Spacer()
+            if hsc != .regular && vsc != .compact {
+                Button { withAnimation(.snappy) { compactFull.toggle(); chrome = true } } label: {
+                    Image(systemName: compactFull ? "keyboard" : "arrow.up.left.and.arrow.down.right")
+                        .font(.headline).frame(width: 36, height: 36)
+                }
+                .background(.ultraThinMaterial, in: Circle())
+                .accessibilityLabel(compactFull ? "Keyboard and trackpad" : "Full screen")
+            }
             Menu {
                 Picker("Pointer", selection: $mode) {
                     Label("Trackpad", systemImage: "rectangle.and.hand.point.up.left").tag("trackpad")
@@ -199,8 +220,8 @@ struct RemoteScreen: View {
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 12)
-        .padding(.top, hsc == .regular ? 14 : 6)
-        .opacity(chrome || hsc != .regular ? 1 : 0)
+        .padding(.top, fullScreen ? 14 : 6)
+        .opacity(chrome || !fullScreen ? 1 : 0)
     }
 
     /// Fully open: a slim dock you can hide by tapping the screen with three fingers… or the eye.
@@ -208,7 +229,7 @@ struct RemoteScreen: View {
         VStack(spacing: 10) {
             if deckTab == "keys" {
                 MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in sendKey(k, m) }
-                    .frame(width: 620, height: 250)
+                    .frame(maxWidth: 620).frame(height: hsc == .regular ? 250 : 210)
             }
             HStack(spacing: 8) {
                 barButton("keyboard", deckTab == "keys" ? "Hide keys" : "Keyboard") { deckTab = deckTab == "keys" ? "both" : "keys" }
@@ -218,7 +239,7 @@ struct RemoteScreen: View {
                 barButton("square.grid.2x2", "Apps") { showApps = true }
                 PasteButton(payloadType: String.self) { s in pasteOnMac(s.first ?? "") }
                     .labelStyle(.iconOnly).buttonBorderShape(.circle).tint(.white.opacity(0.2))
-                barButton("eye.slash", "Hide") { chrome = false }
+                barButton("chevron.down", "Hide") { chrome = false }
             }
             KeyCapture(active: $typing, send: send, mods: { takeMods() }).frame(width: 1, height: 1).opacity(0.01)
         }
@@ -250,11 +271,15 @@ struct RemoteScreen: View {
                 .pickerStyle(.segmented)
                 .frame(width: 150)
                 Spacer()
-                Menu {
-                    ForEach(shortcuts) { sc in
-                        Button { send([["k": "key", "key": sc.key, "mods": sc.mods]]) } label: { Label(sc.id, systemImage: sc.symbol) }
+                Button { showShortcuts = true } label: { Image(systemName: "bolt.fill").frame(width: 30, height: 30) }
+                    .popover(isPresented: $showShortcuts) {
+                        shortcutGrid
+                            .padding(12)
+                            .frame(width: 340)
+                            .background(Color(white: 0.1))
+                            .environment(\.colorScheme, .dark)
+                            .presentationCompactAdaptation(.popover)
                     }
-                } label: { Image(systemName: "bolt.fill").frame(width: 30, height: 30) }
                 Button { typing.toggle() } label: { Image(systemName: typing ? "keyboard.chevron.compact.down" : "character.cursor.ibeam").frame(width: 30, height: 30) }
                 Button { showApps = true } label: { Image(systemName: "square.grid.2x2").frame(width: 30, height: 30) }
                 PasteButton(payloadType: String.self) { s in pasteOnMac(s.first ?? "") }
@@ -270,8 +295,8 @@ struct RemoteScreen: View {
             default:
                 GeometryReader { g in
                     VStack(spacing: 8) {
-                        MacKeyboard(mods: $mods, locked: $locked, showFRow: g.size.height > 420) { k, m in sendKey(k, m) }
-                            .frame(height: g.size.height * 0.58)
+                        MacKeyboard(mods: $mods, locked: $locked, showFRow: true) { k, m in sendKey(k, m) }
+                            .frame(height: g.size.height * 0.62)
                         trackpad.padding(.horizontal, g.size.width * 0.18)    // centered, like a MacBook's
                     }
                 }
@@ -353,6 +378,7 @@ struct RemoteScreen: View {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     send([["k": "key", "key": s.key, "mods": s.mods]])
+                    showShortcuts = false
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: s.symbol).font(.system(size: 15, weight: .semibold))
@@ -578,15 +604,12 @@ final class InputSurface: UIView, UIGestureRecognizerDelegate {
         let tap1 = UITapGestureRecognizer(target: self, action: #selector(tap1(_:)))
         let tap2 = UITapGestureRecognizer(target: self, action: #selector(tap2(_:)))
         tap2.numberOfTouchesRequired = 2
-        let tap3 = UITapGestureRecognizer(target: self, action: #selector(tap3))
-        tap3.numberOfTouchesRequired = 3
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(hold(_:)))
         hold.minimumPressDuration = 0.28
         hold.allowableMovement = 12
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:)))
         pan1.require(toFail: hold)
         tap1.require(toFail: tap2)
-        tap2.require(toFail: tap3)
         var swipes: [UIGestureRecognizer] = []
         for (fingers, dirs) in [(3, [UISwipeGestureRecognizer.Direction.up, .down, .left, .right]), (4, [.down, .up, .left, .right])] {
             for d in dirs {
@@ -596,7 +619,7 @@ final class InputSurface: UIView, UIGestureRecognizerDelegate {
                 swipes.append(sw)
             }
         }
-        for g in [pan1, pan2, tap1, tap2, tap3, hold, pinch] + swipes { g.delegate = self; addGestureRecognizer(g) }
+        for g in [pan1, pan2, tap1, tap2, hold, pinch] + swipes { g.delegate = self; addGestureRecognizer(g) }
         tick.prepare()
     }
 
@@ -659,27 +682,31 @@ final class InputSurface: UIView, UIGestureRecognizerDelegate {
         send(ev)
     }
 
-    @objc private func tap3() { thunk.impactOccurred(); onThreeTap() }
 
     /// macOS trackpad gestures, sent as the shortcuts macOS maps them to.
     var onDisplaySwipe: ((Int) -> Void)?
 
+    /// 3 = like a Mac trackpad. 4 = for phones with iOS Zoom on, which keeps three-finger gestures for itself.
+    private var fingers: Int { UserDefaults.standard.object(forKey: "remote.fingers") as? Int ?? 3 }
+
     @objc private func swipe(_ g: UISwipeGestureRecognizer) {
-        if g.numberOfTouchesRequired == 4 && (g.direction == .left || g.direction == .right) {
+        let n = g.numberOfTouchesRequired, sideways = g.direction == .left || g.direction == .right
+        // the "other" count: with 3-finger gestures, four fingers sideways switches displays / down shows desktop
+        if n != fingers {
+            guard n == 4, fingers == 3 else { return }
             thunk.impactOccurred()
-            onDisplaySwipe?(g.direction == .left ? 1 : -1)
+            if sideways { onDisplaySwipe?(g.direction == .left ? 1 : -1) }
+            else if g.direction == .down { send([["k": "key", "key": "f11", "mods": []]]) }
             return
         }
         guard mode == .trackpad else { return }
         thunk.impactOccurred()
         let key: (String, [String])
-        switch (g.numberOfTouchesRequired, g.direction) {
-        case (3, .up): key = ("up", ["ctrl"])            // Mission Control
-        case (3, .down): key = ("down", ["ctrl"])        // App Exposé
-        case (3, .left): key = ("right", ["ctrl"])       // next Space
-        case (3, .right): key = ("left", ["ctrl"])       // previous Space
-        case (4, .down): key = ("f11", [])               // show desktop
-        default: key = ("up", ["ctrl"])
+        switch g.direction {
+        case .up: key = ("up", ["ctrl"])                 // Mission Control
+        case .down: key = ("down", ["ctrl"])             // App Exposé
+        case .left: key = ("right", ["ctrl"])            // next Space
+        default: key = ("left", ["ctrl"])                // previous Space
         }
         send([["k": "key", "key": key.0, "mods": key.1]])
     }

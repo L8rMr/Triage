@@ -46,43 +46,52 @@ struct MacKeyboard: View {
 
     var body: some View {
         GeometryReader { g in
-            let unit = g.size.width / 15.2
+            let w = g.size.width
             let rowsCount = CGFloat(rows.count + 1)
-            let h = min((g.size.height - 4 * rowsCount) / rowsCount, unit * 1.05)
+            let h = min((g.size.height - 4 * rowsCount) / rowsCount, w / 15 * 1.05)
             VStack(spacing: 4) {
                 ForEach(rows.indices, id: \.self) { i in
+                    // every row fills exactly the width there is: no key ever hangs off an edge
+                    let units = rows[i].reduce(0) { $0 + $1.width }
+                    let unit = (w - 4 * CGFloat(rows[i].count - 1)) / units
                     HStack(spacing: 4) {
                         ForEach(rows[i]) { k in keyView(k, unit: unit, h: i == 0 && showFRow ? h * 0.72 : h) }
                     }
                 }
-                bottomRow(unit: unit, h: h)
+                bottomRow(width: w, h: h)
             }
-            .frame(width: g.size.width, height: g.size.height, alignment: .bottom)
+            .frame(width: w, height: g.size.height, alignment: .bottom)
         }
     }
 
-    private func bottomRow(unit: CGFloat, h: CGFloat) -> some View {
-        HStack(spacing: 4) {
-            modKey("fn", "fn", "globe", unit: unit, h: h)
-            modKey("ctrl", "control", "control", unit: unit, h: h)
-            modKey("opt", "option", "option", unit: unit, h: h)
-            modKey("cmd", "command", "command", unit: unit * 1.3, h: h)
-            keyView(K(label: "", key: "space", width: 5.2), unit: unit, h: h)
-            modKey("cmd", "command", "command", unit: unit * 1.3, h: h)
-            modKey("opt", "option", "option", unit: unit, h: h)
+    /// fn ⌃ ⌥ ⌘ [space] ⌘ ⌥ ◀▲▼▶, in MacBook proportions, summing to the full width.
+    private func bottomRow(width: CGFloat, h: CGFloat) -> some View {
+        // 1 + 1 + 1 + 1.25 + space 5 + 1.25 + 1 + arrows 3 = 14.5 units, 8 gaps of 4 pt
+        let unit = (width - 4 * 8) / 14.5
+        let arrow = (unit * 3 - 4) / 3
+        return HStack(spacing: 4) {
+            modKey("fn", "fn", "globe", width: unit, h: h)
+            modKey("ctrl", "control", "control", width: unit, h: h)
+            modKey("opt", "option", "option", width: unit, h: h)
+            modKey("cmd", "command", "command", width: unit * 1.25, h: h)
+            keyView(K(label: "", key: "space", width: 5), unit: unit, h: h)
+            modKey("cmd", "command", "command", width: unit * 1.25, h: h)
+            modKey("opt", "option", "option", width: unit, h: h)
             // inverted T
             VStack(spacing: 2) {
-                keyView(K(label: "▲", key: "up", small: true), unit: unit, h: h / 2 - 1)
+                keyView(K(label: "▲", key: "up", small: true), unit: arrow, h: h / 2 - 1)
                 HStack(spacing: 2) {
-                    keyView(K(label: "◀", key: "left", small: true), unit: unit, h: h / 2 - 1)
-                    keyView(K(label: "▼", key: "down", small: true), unit: unit, h: h / 2 - 1)
-                    keyView(K(label: "▶", key: "right", small: true), unit: unit, h: h / 2 - 1)
+                    keyView(K(label: "◀", key: "left", small: true), unit: arrow, h: h / 2 - 1)
+                    keyView(K(label: "▼", key: "down", small: true), unit: arrow, h: h / 2 - 1)
+                    keyView(K(label: "▶", key: "right", small: true), unit: arrow, h: h / 2 - 1)
                 }
             }
+            .frame(width: unit * 3)
         }
+        .frame(width: width)
     }
 
-    private func modKey(_ mod: String, _ label: String, _ symbol: String, unit: CGFloat, h: CGFloat) -> some View {
+    private func modKey(_ mod: String, _ label: String, _ symbol: String, width: CGFloat, h: CGFloat) -> some View {
         let on = mods.contains(mod), lock = locked.contains(mod)
         return Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -94,8 +103,8 @@ struct MacKeyboard: View {
                 Image(systemName: symbol).font(.system(size: max(9, h * 0.28)))
                 Text(label).font(.system(size: max(7, h * 0.2)))
             }
-            .frame(width: unit * 1.15, height: h, alignment: .bottomLeading)
-            .padding(.leading, 4)
+            .padding(.leading, 4).padding(.bottom, 3)
+            .frame(width: width, height: h, alignment: .bottomLeading)
         }
         .buttonStyle(KeyStyle(active: on || lock, locked: lock))
     }
@@ -107,7 +116,7 @@ struct MacKeyboard: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 if lock { locked.remove(mod); mods.remove(mod) } else if on { mods.remove(mod); locked.insert(mod) } else { mods.insert(mod) }
             } label: {
-                Text("⇧ " + k.label).font(.system(size: max(8, h * 0.24))).frame(width: unit * k.width + 4 * (k.width - 1), height: h)
+                Text("⇧ " + k.label).font(.system(size: max(8, h * 0.24))).lineLimit(1).minimumScaleFactor(0.6).frame(width: unit * k.width, height: h)
             }
             .buttonStyle(KeyStyle(active: on || lock, locked: lock))
         } else if k.key == "caps" {
@@ -118,9 +127,9 @@ struct MacKeyboard: View {
             } label: {
                 HStack {
                     Circle().fill(lock ? Color.phosphor : Color.white.opacity(0.25)).frame(width: 5, height: 5)
-                    Text(k.label).font(.system(size: max(8, h * 0.22)))
+                    Text(k.label).font(.system(size: max(8, h * 0.22))).lineLimit(1).minimumScaleFactor(0.6)
                 }
-                .frame(width: unit * k.width + 4 * (k.width - 1), height: h)
+                .frame(width: unit * k.width, height: h)
             }
             .buttonStyle(KeyStyle(active: false, locked: false))
         } else {
@@ -147,7 +156,8 @@ struct MacKeyboard: View {
                             .font(.system(size: k.small ? max(8, h * 0.24) : max(12, h * 0.42), weight: k.small ? .regular : .medium))
                     }
                 }
-                .frame(width: unit * k.width + 4 * (k.width - 1), height: h)
+                .frame(width: unit * k.width, height: h)
+                .lineLimit(1).minimumScaleFactor(0.6)
             }
         }
     }

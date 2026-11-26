@@ -10,6 +10,7 @@ struct SettingsScreen: View {
     @AppStorage("remote.sensitivity") private var sensitivity = 1.6
     @AppStorage("remote.mode") private var pointer = "trackpad"
     @AppStorage("remote.clipAuto") private var clipAuto = true
+    @AppStorage("remote.fingers") private var fingers = 3
     @State private var confirmForget = false
     @State private var note: String?
 
@@ -103,6 +104,10 @@ struct SettingsScreen: View {
                 Text("Trackpad speed")
                 Slider(value: $sensitivity, in: 0.6...3.2) { Text("Speed") } minimumValueLabel: { Image(systemName: "tortoise") } maximumValueLabel: { Image(systemName: "hare") }
             }
+            Picker("Swipe gestures", selection: $fingers) {
+                Text("3 fingers, like a Mac").tag(3)
+                Text("4 fingers (iOS Zoom on)").tag(4)
+            }
             Toggle("Copy from Mac to iPhone automatically", isOn: $clipAuto)
             DisclosureGroup("Trackpad gestures") {
                 VStack(alignment: .leading, spacing: 6) {
@@ -111,16 +116,18 @@ struct SettingsScreen: View {
                     gesture("Two-finger drag", "Scroll")
                     gesture("Hold, then drag", "Drag and select")
                     gesture("Pinch", "Zoom in or out")
-                    gesture("Three-finger swipe up", "Mission Control")
-                    gesture("Three-finger swipe down", "App Exposé")
-                    gesture("Three-finger swipe sideways", "Switch Spaces")
-                    gesture("Three-finger tap", "Look Up")
-                    gesture("Four-finger swipe down", "Show desktop")
+                    gesture("\(fingers)-finger swipe up", "Mission Control")
+                    gesture("\(fingers)-finger swipe down", "App Exposé")
+                    gesture("\(fingers)-finger swipe sideways", "Switch Spaces")
+                    if fingers == 3 {
+                        gesture("4-finger swipe sideways", "Next or previous display")
+                        gesture("4-finger swipe down", "Show desktop")
+                    }
                 }
                 .font(.callout)
             }
         } header: { Text("Remote desktop") } footer: {
-            Text("Fastest favors smooth motion, Sharpest favors crisp text. On iPhone Duo, half-fold it like a laptop for a screen up top and a keyboard and trackpad below.")
+            Text("If three-finger swipes zoom the iPhone instead, iOS Zoom is on (Settings › Accessibility › Zoom): turn it off or pick 4 fingers here. Fastest favors smooth motion, Sharpest favors crisp text. On iPhone Duo, half-fold it like a laptop for a screen up top and a keyboard and trackpad below.")
         }
     }
 
