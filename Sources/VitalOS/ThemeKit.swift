@@ -220,6 +220,7 @@ struct Themed: ViewModifier {
             .id(store.revision)
             .tint(store.accent)
             .preferredColorScheme(store.scheme)
+            .modifier(ForceScheme(scheme: store.scheme))
             .controlSize(store.density == "compact" ? .small : store.density == "touch" ? .large : .regular)
             .modifier(ThemeButtons(chrome: t.chrome))
             .background(ThemeBackdrop(theme: t).ignoresSafeArea())
@@ -532,6 +533,7 @@ struct ThemedPanel: ViewModifier {
             .id(store.revision)
             .tint(store.accent)
             .preferredColorScheme(store.scheme)
+            .modifier(ForceScheme(scheme: store.scheme))
             .modifier(ThemeButtons(chrome: t.chrome))
             .background(ThemeBackdrop(theme: t))
             .overlay { if t.backdrop == .scanlines { Scanlines().allowsHitTesting(false) } }
@@ -540,6 +542,27 @@ struct ThemedPanel: ViewModifier {
 
 extension View {
     func themedPanel() -> some View { modifier(ThemedPanel()) }
+}
+
+/// preferredColorScheme doesn't reach the menu bar panel's window: with the Mac in dark mode a light theme
+/// drew white labels on a light background. Pin the scheme in SwiftUI *and* on the hosting window.
+struct ForceScheme: ViewModifier {
+    let scheme: ColorScheme?
+    func body(content: Content) -> some View {
+        if let scheme {
+            content.environment(\.colorScheme, scheme).background(WindowAppearance(dark: scheme == .dark))
+        } else { content.background(WindowAppearance(dark: nil)) }
+    }
+}
+
+private struct WindowAppearance: NSViewRepresentable {
+    let dark: Bool?
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ v: NSView, context: Context) {
+        DispatchQueue.main.async {
+            v.window?.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua)! }
+        }
+    }
 }
 
 struct HideSidebarToggle: ViewModifier {
