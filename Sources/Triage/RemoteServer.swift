@@ -84,6 +84,7 @@ final class RemoteServer: ObservableObject {
     private var sessions: [UUID: RemoteSession] = [:]      // touched only on `queue`
     private var assertion: IOPMAssertionID = 0
     private var vitalsSink: AnyCancellable?
+    private var themeSink: AnyCancellable?
     private var retry: DispatchWorkItem?
 
     private init() {}
@@ -94,6 +95,14 @@ final class RemoteServer: ObservableObject {
         vitalsSink = SystemMonitor.shared.$bpm
             .receive(on: DispatchQueue.main)        // @Published fires in willSet; hop once so we read the new values
             .sink { [weak self] _ in self?.pushVitals() }
+        // the Mac's theme changed: phones that follow it repaint
+        themeSink = ThemeStore.shared.$themeID
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] id in
+                guard let self, self.listening else { return }
+                self.queue.async { self.sessions.values.forEach { $0.push("theme", ["id": id]) } }
+            }
     }
 
     // MARK: Listener
@@ -101,7 +110,9 @@ final class RemoteServer: ObservableObject {
     private func apply() {
         if mode == .off { stop(); return }
         guard listener == nil else { status = listening ? statusLine : status; return }
-        let params = NWParameters.tcp
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true                      // remote desktop: send every tiny input/frame now, not batched
+        let params = NWParameters(tls: nil, tcp: tcp)
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         ws.maximumMessageSize = 16 << 20
@@ -173,6 +184,8 @@ final class RemoteServer: ObservableObject {
 
     func dropped(_ s: RemoteSession) {        // on queue
         sessions[s.id] = nil
+        stopWatching(s)
+        if s.clipSync { clipboardWatchChanged() }
         let anyWatching = sessions.values.contains { $0.subscribed }
         DispatchQueue.main.async {
             if let name = self.connected.removeValue(forKey: s.id) { self.record(name, "Disconnected") }
@@ -241,6 +254,77 @@ final class RemoteServer: ObservableObject {
         queue.async { self.sessions.values.filter { $0.deviceID == d.id }.forEach { $0.reject("This iPhone was removed on the Mac") } }
     }
 
+    // MARK: Remote desktop
+
+    @Published private(set) var watcher: String?
+    private var watchingSession: UUID?
+    private var clipTimer: Timer?
+    private var clipCount = NSPasteboard.general.changeCount
+
+    func startWatching(_ s: RemoteSession) {
+        let id = s.id
+        ScreenShare.shared.onFrame = { [weak self] frame in
+            guard let self else { return }
+            self.queue.async { self.sessions[id]?.pushBinary(frame) }
+        }
+        DispatchQueue.main.async {
+            if self.watchingSession != id { self.record(s.deviceName, "Started remote desktop") }
+            self.watchingSession = id
+            self.watcher = s.deviceName
+        }
+    }
+
+    func stopWatching(_ s: RemoteSession) {
+        DispatchQueue.main.async {
+            guard self.watchingSession == s.id else { return }
+            ScreenShare.shared.onFrame = nil
+            ScreenShare.shared.stop()
+            self.watchingSession = nil
+            self.watcher = nil
+            self.record(s.deviceName, "Ended remote desktop")
+        }
+    }
+
+    /// The person at the Mac pulled the plug on the phone's remote session.
+    func endDesktop() {
+        guard let id = watchingSession else { return }
+        ScreenShare.shared.onFrame = nil
+        ScreenShare.shared.stop()
+        record(watcher ?? "iPhone", "Remote desktop stopped from the Mac")
+        watchingSession = nil
+        watcher = nil
+        queue.async { self.sessions[id]?.push("desktopEnded", [:]) }
+    }
+
+    /// Phones that asked for it get whatever the Mac copies, as it happens.
+    func clipboardWatchChanged() {
+        queue.async {
+            let any = self.sessions.values.contains { $0.clipSync }
+            DispatchQueue.main.async {
+                if any && self.clipTimer == nil {
+                    self.clipCount = NSPasteboard.general.changeCount
+                    let t = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in self?.pollClipboard() }
+                    RunLoop.main.add(t, forMode: .common)
+                    self.clipTimer = t
+                } else if !any {
+                    self.clipTimer?.invalidate(); self.clipTimer = nil
+                }
+            }
+        }
+    }
+
+    func noteOwnClipboardChange() {
+        DispatchQueue.main.async { self.clipCount = NSPasteboard.general.changeCount }
+    }
+
+    private func pollClipboard() {
+        let c = NSPasteboard.general.changeCount
+        guard c != clipCount else { return }
+        clipCount = c
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty, text.count < 200_000 else { return }
+        queue.async { self.sessions.values.filter { $0.clipSync }.forEach { $0.push("clipboard", ["text": text]) } }
+    }
+
     // MARK: Live vitals
 
     private func pushVitals() {
@@ -305,6 +389,8 @@ final class RemoteSession {
     var deviceID: String?
     var deviceName = "iPhone"
     var subscribed = false
+    var clipSync = false
+    private var framesInFlight = 0
 
     private let eph = P256.KeyAgreement.PrivateKey()
     private var clientPub: P256.KeyAgreement.PublicKey?
@@ -378,6 +464,18 @@ final class RemoteSession {
     }
 
     func push(_ type: String, _ body: [String: Any]) { sendSecure(["t": type, "body": body]) }
+
+    /// Screen frames: sealed raw bytes, at most two on the wire, so a slow moment drops frames instead of building lag.
+    func pushBinary(_ payload: Data) {       // on queue
+        guard let key, !closed, framesInFlight < 2, let box = try? ChaChaPoly.seal(payload, using: key) else { return }
+        framesInFlight += 1
+        let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
+        let ctx = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
+        conn.send(content: box.combined, contentContext: ctx, isComplete: true, completion: .contentProcessed { [weak self] _ in
+            guard let self else { return }
+            self.server.queue.async { self.framesInFlight = max(0, self.framesInFlight - 1) }
+        })
+    }
 
     // MARK: Handshake
 
@@ -466,6 +564,12 @@ final class RemoteSession {
         let op = req["op"] as? String ?? ""
         let args = req["args"] as? [String: Any] ?? [:]
 
+        if op == "input" {                         // the hot path: no reply, no main thread
+            if server.mode == .full, let ev = args["events"] as? [[String: Any]] {
+                if RemoteInput.trusted { RemoteInput.handle(ev) } else { RemoteInput.askForAccess() }
+            }
+            return
+        }
         if op == "subscribe" {
             subscribed = (args["vitals"] as? Bool) ?? true
             server.subscriptionChanged()
@@ -494,14 +598,13 @@ enum RemoteAPI {
     static func hello(mode: RemoteMode) -> [String: Any] {
         var d = info()
         d["mode"] = mode.rawValue
-        d["ops"] = ["vitals", "info", "apps", "list", "search", "keepAwake"] + (mode == .full ? ["quitApp", "trash", "emptyTrash"] : [])
+        d["ops"] = allOps + (mode == .full ? Array(writeOps) : [])
         return d
     }
 
     static func perform(_ op: String, _ a: [String: Any], session s: RemoteSession, mode: RemoteMode, done: @escaping Done) {
         DispatchQueue.main.async {
-            let fullOps: Set<String> = ["quitApp", "trash", "emptyTrash"]
-            if fullOps.contains(op) && mode != .full {
+            if writeOps.contains(op) && mode != .full {
                 done(.failure(RemoteError(message: "This Mac only allows viewing. Turn on Full control in Triage › Settings › iPhone.")))
                 return
             }
@@ -524,7 +627,8 @@ enum RemoteAPI {
                 FileOps.emptyTrash()
                 RemoteServer.shared.record(s.deviceName, "Emptied the Trash")
                 done(.success([:]))
-            default: done(.failure(RemoteError(message: "Unknown request \(op)")))
+            default:
+                if !desktop(op, a, s, done) && !more(op, a, s, done) { done(.failure(RemoteError(message: "Unknown request \(op)"))) }
             }
         }
     }
@@ -560,7 +664,7 @@ enum RemoteAPI {
         var d: [String: Any] = ["name": Host.current().localizedName ?? "Mac", "model": MacFacts.model, "chip": MacFacts.chip,
                                 "os": MacFacts.macOS, "boot": MacFacts.bootDate.timeIntervalSince1970,
                                 "memTotal": ProcessInfo.processInfo.physicalMemory, "home": NSHomeDirectory(),
-                                "user": NSFullUserName()]
+                                "user": NSFullUserName(), "theme": ThemeStore.shared.themeID]
         if let setup = MacFacts.setupDate { d["setup"] = setup.timeIntervalSince1970 }
         return d
     }

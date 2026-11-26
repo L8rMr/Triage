@@ -8,8 +8,10 @@ struct AppsScreen: View {
     @State private var error: String?
     @State private var toast: String?
 
-    private var sorted: [AppInfo] {
-        sort == "cpu" ? apps.sorted { $0.cpu > $1.cpu } : apps.sorted { $0.memory > $1.memory }
+    /// Rows keep their place while you scroll; the order is re-ranked only when you pull to refresh or change the sort.
+    private var sorted: [AppInfo] { apps }
+    private func ranked(_ a: [AppInfo]) -> [AppInfo] {
+        sort == "cpu" ? a.sorted { $0.cpu > $1.cpu } : a.sorted { $0.memory > $1.memory }
     }
 
     var body: some View {
@@ -54,7 +56,9 @@ struct AppsScreen: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
-        .refreshable { await load() }
+        .refreshable { await load(rerank: true) }
+        .onChange(of: sort) { _, _ in withAnimation(.snappy) { apps = ranked(apps) } }
+        .background(Color.glass900)
         .confirmationDialog(confirm.map { "\($0.force ? "Force quit" : "Quit") \($0.app.name) on \(link.macName)?" } ?? "",
                             isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
                             titleVisibility: .visible) {
@@ -99,9 +103,15 @@ struct AppsScreen: View {
         }
     }
 
-    private func load() async {
-        guard let d = try? await link.call("apps"), let list = d["apps"], let a: [AppInfo] = decode(list) else { return }
-        apps = a
+    private func load(rerank: Bool = false) async {
+        guard let d = try? await link.call("apps"), let list = d["apps"], let fresh: [AppInfo] = decode(list) else { return }
+        if apps.isEmpty || rerank { apps = ranked(fresh); return }
+        // update numbers in place, drop apps that quit, add new ones at the bottom
+        let byID = Dictionary(fresh.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var next = apps.compactMap { byID[$0.id] }
+        let known = Set(next.map(\.id))
+        next += ranked(fresh.filter { !known.contains($0.id) })
+        apps = next
     }
 
     private func quit(_ a: AppInfo, force: Bool) {

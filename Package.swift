@@ -23,6 +23,7 @@ let package = Package(
                 .linkedFramework("CoreBluetooth"),
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("ServiceManagement"),
+                .linkedFramework("ScreenCaptureKit"),
                 // Embed Info.plist so macOS can show permission prompts (Location, Audio) even when run from Xcode.
                 .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", infoPlist]),
             ]

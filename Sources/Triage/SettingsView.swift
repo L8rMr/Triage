@@ -299,6 +299,11 @@ private struct IPhonePage: View {
                 ThemeSegments(selection: Binding(get: { remote.mode.rawValue }, set: { remote.mode = RemoteMode(rawValue: $0) ?? .off }),
                               options: RemoteMode.allCases.map { ($0.rawValue, $0.title) }).frame(width: 320.d)
             }
+            if let w = remote.watcher {
+                Row(title: "Remote desktop", hint: "\(w) is viewing and controlling this Mac") {
+                    Button("Stop") { remote.endDesktop() }
+                }
+            }
             Row(title: "Status", hint: remote.keepAwake ? "Kept awake from the iPhone" : nil) {
                 HStack(spacing: 6) {
                     Circle().fill(remote.listening ? (remote.connected.isEmpty ? Color.orange : Color.green) : Color.secondary).frame(width: 8, height: 8)

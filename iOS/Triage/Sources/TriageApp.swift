@@ -4,6 +4,7 @@ import SwiftUI
 struct TriageRemoteApp: App {
     @StateObject private var link = MacLink.shared
     @StateObject private var browser = MacBrowser()
+    @ObservedObject private var theme = ThemeModel.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -15,9 +16,11 @@ struct TriageRemoteApp: App {
                     ConnectView(browser: browser)
                 }
             }
+            .id(theme.activeID)                       // repaint everything when the theme changes
             .environmentObject(link)
-            .preferredColorScheme(.dark)
-            .tint(.phosphor)
+            .preferredColorScheme(theme.palette.scheme)
+            .tint(theme.palette.accent)
+            .fontDesign(theme.palette.mono ? .monospaced : .default)
             .background(Color.glass900.ignoresSafeArea())
             .onAppear { browser.start() }
             .onChange(of: scenePhase) { _, p in
@@ -37,45 +40,49 @@ struct TriageRemoteApp: App {
 }
 
 enum Pane: String, CaseIterable, Identifiable, Hashable {
-    case heart, apps, files, mac
+    case home, heart, files, remote, tools, settings
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .home: return "Home"
         case .heart: return "Heart"
-        case .apps: return "Apps"
         case .files: return "Files"
-        case .mac: return "Mac"
+        case .remote: return "Remote"
+        case .tools: return "Tools"
+        case .settings: return "Settings"
         }
     }
     var symbol: String {
         switch self {
+        case .home: return "house.fill"
         case .heart: return "waveform.path.ecg"
-        case .apps: return "square.stack.3d.up.fill"
         case .files: return "folder.fill"
-        case .mac: return "laptopcomputer"
+        case .remote: return "display"
+        case .tools: return "wrench.and.screwdriver.fill"
+        case .settings: return "gearshape.fill"
         }
     }
+    /// The phone's tab bar holds five; the heart monitor lives on Home (and in the sidebar when there's room).
+    static let tabs: [Pane] = [.home, .files, .remote, .tools, .settings]
 }
 
-/// Closed iPhone Duo (or any iPhone): tabs. Open Duo, iPad, landscape Max: sidebar + detail.
+/// Closed iPhone Duo (or any iPhone): tabs. Open Duo, iPad: sidebar + detail, and Remote goes edge to edge.
 /// Decided by size class, never by screen size, so folding mid-use just reflows.
 struct MainView: View {
     @EnvironmentObject var link: MacLink
     @Environment(\.horizontalSizeClass) private var hsc
-    @SceneStorage("section") private var section: Pane = .heart
+    @SceneStorage("section") private var section: Pane = .home
+    @State private var previous: Pane = .home
+    @State private var columns: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
         Group {
             if hsc == .regular {
-                NavigationSplitView {
-                    List(selection: Binding(get: { Optional(section) }, set: { section = $0 ?? .heart })) {
+                NavigationSplitView(columnVisibility: $columns) {
+                    List(selection: Binding(get: { Optional(section) }, set: { section = $0 ?? .home })) {
                         Section {
-                            ForEach(Pane.allCases) { s in
-                                Label(s.title, systemImage: s.symbol).tag(s)
-                            }
-                        } header: {
-                            MacHeader()
-                        }
+                            ForEach(Pane.allCases) { s in Label(s.title, systemImage: s.symbol).tag(s) }
+                        } header: { MacHeader() }
                     }
                     .navigationTitle("Triage")
                     .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
@@ -84,13 +91,17 @@ struct MainView: View {
                 }
             } else {
                 TabView(selection: $section) {
-                    ForEach(Pane.allCases) { s in
+                    ForEach(Pane.tabs) { s in
                         Tab(s.title, systemImage: s.symbol, value: s) {
                             NavigationStack { screen(s) }
                         }
                     }
                 }
             }
+        }
+        .onChange(of: section) { old, new in
+            if new == .remote { previous = old == .remote ? .home : old; columns = .detailOnly } else { columns = .automatic }
+            if hsc != .regular && new == .heart { section = .home }
         }
         .overlay(alignment: .top) {
             if link.reconnecting {
@@ -107,10 +118,12 @@ struct MainView: View {
 
     @ViewBuilder private func screen(_ s: Pane) -> some View {
         switch s {
+        case .home: HomeScreen(go: { section = $0 })
         case .heart: HeartScreen()
-        case .apps: AppsScreen()
         case .files: FilesScreen(path: nil)
-        case .mac: MacScreen()
+        case .remote: RemoteScreen(exit: { section = previous })
+        case .tools: ToolsScreen()
+        case .settings: SettingsScreen()
         }
     }
 }

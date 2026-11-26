@@ -10,3 +10,4 @@ build/
 TestFiles/*.log
 TestFiles/perf.log
 dist/
+iOS/*.xcodeproj/

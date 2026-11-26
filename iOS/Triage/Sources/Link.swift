@@ -3,6 +3,7 @@ import Network
 import CryptoKit
 import Security
 import UIKit
+import SwiftUI
 
 // The phone's side of Triage Remote. Mirrors RemoteServer.swift on the Mac:
 // hello ⇄ hello → pair (6-digit code) | auth (stored secret) → ChaChaPoly frames.
@@ -92,9 +93,10 @@ final class MacLink: ObservableObject {
         return s
     }()
 
+    /// iOS hides the phone's real name from apps, so it's whatever you call it in Settings.
     var deviceName: String {
-        let n = UIDevice.current.name
-        return n == "iPhone" || n == "iPad" ? "\(n) (\(UIDevice.current.model))" : n
+        let n = (UserDefaults.standard.string(forKey: "device.name") ?? "").trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? UIDevice.current.model : n
     }
 
     // MARK: Connect / disconnect
@@ -112,7 +114,10 @@ final class MacLink: ObservableObject {
             self.macName = target.id
             if self.phase != .ready { self.phase = .connecting(target.id) } else { self.reconnecting = true }
         }
-        let params = NWParameters.tcp
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true            // every touch goes out now, not batched: this is what makes the remote feel immediate
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.serviceClass = .interactiveVideo
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         ws.maximumMessageSize = 16 << 20
@@ -237,12 +242,11 @@ final class MacLink: ObservableObject {
     }
 
     private func handle(_ data: Data) {   // on q
-        let plainJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        var plainJSON: [String: Any]? { (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] }
         if let key {
-            if let box = try? ChaChaPoly.SealedBox(combined: data), let plain = try? ChaChaPoly.open(box, using: key),
-               let o = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] {
-                handleSecure(o)
-                return
+            if let box = try? ChaChaPoly.SealedBox(combined: data), let plain = try? ChaChaPoly.open(box, using: key) {
+                if plain.first == 0x46 { RemoteFrames.shared.receive(plain); return }     // "F": a screen frame
+                if let o = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] { handleSecure(o); return }
             }
             // A wrong pairing code (or a rejected auth) comes back in plain JSON.
             guard let o = plainJSON else { lost("Garbled message"); return }
@@ -314,7 +318,9 @@ final class MacLink: ObservableObject {
             let info: MacInfo? = decode(body)
             let mode = body["mode"] as? String ?? "view"
             let name = target?.id
+            let theme = body["theme"] as? String
             DispatchQueue.main.async {
+                if let theme { ThemeModel.shared.macThemeID = theme }
                 self.info = info
                 self.mode = mode
                 self.phase = .ready
@@ -331,6 +337,19 @@ final class MacLink: ObservableObject {
             DispatchQueue.main.async { done(r) }
         case "vitals":
             if let v: Vitals = decode(o["body"] ?? [:]) { DispatchQueue.main.async { self.vitals = v } }
+        case "theme":
+            if let id = (o["body"] as? [String: Any])?["id"] as? String {
+                DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.4)) { ThemeModel.shared.macThemeID = id } }
+            }
+        case "clipboard":
+            if let t = (o["body"] as? [String: Any])?["text"] as? String, UserDefaults.standard.object(forKey: "remote.clipAuto") as? Bool ?? true {
+                DispatchQueue.main.async {
+                    UIPasteboard.general.string = t
+                    RemoteFrames.shared.flash("Copied from \(self.macName)")
+                }
+            }
+        case "desktopEnded":
+            DispatchQueue.main.async { RemoteFrames.shared.ended = true }
         case "bye":
             let why = (o["body"] as? [String: Any])?["reason"] as? String ?? "The Mac closed the connection"
             fail(why, forget: why.contains("removed"))
@@ -362,8 +381,58 @@ final class MacLink: ObservableObject {
         }
     }
 
+    /// Fire and forget (mouse and keys): no reply, no waiting.
+    func send(_ op: String, _ args: [String: Any]) {
+        q.async {
+            guard self.key != nil, self.conn != nil else { return }
+            self.seq += 1
+            self.sendSealed(["id": self.seq, "n": self.seq, "op": op, "args": args])
+        }
+    }
+
     func setKeepAwake(_ on: Bool) async throws {
         _ = try await call("keepAwake", ["on": on])
+    }
+
+    /// Mac → phone, 4 MB at a time, into a cache folder Quick Look and Share can open.
+    func download(_ path: String, progress: @escaping (Double) -> Void) async throws -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads/" + String(abs(path.hashValue)), isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let out = dir.appendingPathComponent((path as NSString).lastPathComponent)
+        FileManager.default.createFile(atPath: out.path, contents: nil)
+        let h = try FileHandle(forWritingTo: out)
+        defer { try? h.close() }
+        var offset = 0
+        while true {
+            let d = try await call("fetch", ["path": path, "offset": offset])
+            guard let b64 = d["data"] as? String, let data = Data(base64Encoded: b64) else { throw LinkError("The Mac sent something unreadable") }
+            try h.write(contentsOf: data)
+            offset += data.count
+            let size = max(d["size"] as? Int ?? 1, 1)
+            await MainActor.run { progress(min(Double(offset) / Double(size), 1)) }
+            if (d["done"] as? Bool) == true || data.isEmpty { break }
+        }
+        return out
+    }
+
+    /// Phone → Mac, 4 MB at a time. Returns the path it landed at (renamed if the name was taken).
+    func upload(_ data: Data, name: String, to dir: String, progress: @escaping (Double) -> Void) async throws -> String {
+        let chunk = 4 << 20
+        var target: String?
+        var i = 0
+        repeat {
+            let piece = data.subdata(in: i..<min(i + chunk, data.count))
+            var args: [String: Any] = ["data": piece.base64EncodedString(), "last": i + chunk >= data.count]
+            if let target { args["target"] = target } else { args["dir"] = dir; args["name"] = name }
+            let d = try await call("upload", args)
+            target = d["target"] as? String
+            i += chunk
+            let done = Double(min(i, data.count)) / Double(max(data.count, 1))
+            await MainActor.run { progress(done) }
+        } while i < data.count
+        return target ?? dir
     }
 }
 

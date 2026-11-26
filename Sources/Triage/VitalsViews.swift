@@ -411,7 +411,7 @@ enum MenuBarImage {
         let hs = heart?.size ?? .zero
         let gap: CGFloat = heart != nil && !text.isEmpty ? 4 : 0
         // a paired iPhone is looking: say so right in the menu bar
-        let iphone = phone ? NSImage(systemSymbolName: "iphone.gen3", accessibilityDescription: "iPhone connected")?
+        let iphone = phone ? NSImage(systemSymbolName: RemoteServer.shared.watcher != nil ? "iphone.gen3.radiowaves.left.and.right" : "iphone.gen3", accessibilityDescription: "iPhone connected")?
             .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) : nil
         let ps = iphone?.size ?? .zero
         let pgap: CGFloat = iphone != nil ? 5 : 0

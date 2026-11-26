@@ -13,7 +13,6 @@ final class ECGEngine {
     var cursor = 0.0                  // sweep position in columns
     var last: Date?
     var haptics = false
-    private let tap = UIImpactFeedbackGenerator(style: .soft)
 
     init(columns: Int = 600) { samples = Array(repeating: 0, count: columns) }
 
@@ -34,7 +33,7 @@ final class ECGEngine {
             if phase >= 1 {
                 phase -= 1
                 // the Mac's pulse in your hand: soft at rest, firmer when it's working hard
-                if !flat && haptics { tap.impactOccurred(intensity: min(1, 0.35 + (shownBPM - 60) / 160)) }
+                if !flat && haptics { Pulse.beat(bpm: shownBPM) }
             }
             let i = Int(cursor) % columns
             samples[i] = flat ? jitter() : Self.pqrst(phase, bpm: shownBPM) + jitter()
@@ -111,37 +110,59 @@ struct ECGView: View {
     }
 }
 
+/// A real heartbeat is two sounds: lub (valves closing, strong) then dub (softer), closer together as it races.
+enum Pulse {
+    private static let gen = UIImpactFeedbackGenerator(style: .heavy)
+    static func beat(bpm: Double) {
+        let strength = UserDefaults.standard.object(forKey: "pulse.strength") as? Int ?? 2
+        let base = [0.45, 0.7, 1.0][max(0, min(strength, 2))]
+        let lub = min(1, base + max(0, bpm - 60) / 400)
+        gen.prepare()
+        gen.impactOccurred(intensity: lub)
+        let gap = 0.3 * sqrt(60 / max(bpm, 40))
+        DispatchQueue.main.asyncAfter(deadline: .now() + gap) { gen.impactOccurred(intensity: lub * 0.6) }
+    }
+}
+
 // MARK: - Heart screen
 
 struct HeartScreen: View {
     @EnvironmentObject var link: MacLink
     @AppStorage("heart.haptics") private var haptics = false
     @State private var awakeBusy = false
+    @State private var width: CGFloat = 0
     @State private var error: String?
 
     var body: some View {
         ScrollView {
             if let v = link.vitals {
                 // Open iPhone Duo / iPad: monitor and vitals side by side. Closed: stacked.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(spacing: 16) { monitor(v); battery(v) }.frame(minWidth: 380)
-                        VStack(spacing: 16) { factors(v); topApps(v) }.frame(minWidth: 320)
+                Group {
+                    if width > 720 {
+                        HStack(alignment: .top, spacing: 16) {
+                            VStack(spacing: 16) { monitor(v); battery(v) }
+                            VStack(spacing: 16) { factors(v); topApps(v) }
+                        }
+                    } else {
+                        VStack(spacing: 16) { monitor(v); factors(v); battery(v); topApps(v) }
                     }
-                    VStack(spacing: 16) { monitor(v); factors(v); battery(v); topApps(v) }
                 }
                 .padding(16)
             } else {
                 ProgressView("Listening for a heartbeat…").padding(.top, 80)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .scrollBounceBehavior(.basedOnSize)
+        .background(Color.glass900)
         .navigationTitle(link.macName)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { haptics.toggle() } label: {
-                    Image(systemName: haptics ? "hand.tap.fill" : "hand.tap")
+                    Label(haptics ? "Pulse on" : "Feel pulse", systemImage: haptics ? "hand.tap.fill" : "hand.tap")
+                        .labelStyle(.titleAndIcon)
                 }
-                .accessibilityLabel(haptics ? "Stop feeling the pulse" : "Feel the pulse")
             }
         }
         .alert("Couldn't do that", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
@@ -176,10 +197,10 @@ struct HeartScreen: View {
                 ECGView(bpm: v.bpm, color: c, haptics: haptics)
                     .frame(height: 150)
                     .padding(.bottom, 12)
-                if let line = diagnosis(v) {
-                    Text(line).font(.callout).foregroundStyle(.primary.opacity(0.85))
-                        .padding(.horizontal, 16).padding(.bottom, 14)
-                }
+                Text(diagnosis(v) ?? " ").font(.callout).foregroundStyle(.primary.opacity(0.85))
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
                 Divider().overlay(Color.white.opacity(0.06))
                 Toggle(isOn: Binding(get: { v.keepAwake ?? false }, set: { on in
                     awakeBusy = true
@@ -230,9 +251,9 @@ struct HeartScreen: View {
                             }
                         }
                         .frame(height: 5)
-                        if let c = f.cause, !c.isEmpty, f.stress > 0.3 {
-                            Text("Mostly \(c)").font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(f.cause.flatMap { $0.isEmpty ? nil : "Mostly \($0)" } ?? " ")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .opacity((f.cause ?? "").isEmpty || f.stress <= 0.3 ? 0 : 1)
                     }
                     .animation(.easeInOut(duration: 0.6), value: f.stress)
                 }
@@ -263,7 +284,7 @@ struct HeartScreen: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 Text("WORKING HARDEST").font(.caption.weight(.bold)).kerning(1).foregroundStyle(.secondary)
-                ForEach(v.top ?? []) { a in
+                ForEach(Array((v.top ?? []).prefix(5))) { a in
                     HStack {
                         Text(a.name).font(.subheadline).lineLimit(1)
                         Spacer()

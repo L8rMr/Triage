@@ -94,22 +94,23 @@ struct FileEntry: Decodable, Identifiable, Hashable {
     }
 }
 
-// MARK: - Look
+// MARK: - Look (follows the active theme)
 
 extension Color {
-    static let phosphor = Color(red: 0x2B / 255, green: 0xF5 / 255, blue: 0x9A / 255)
-    static let phosphorDim = Color(red: 0x1A / 255, green: 0x9E / 255, blue: 0x63 / 255)
-    static let amber = Color(red: 1, green: 0xC2 / 255, blue: 0x4B / 255)
-    static let coral = Color(red: 1, green: 0x5A / 255, blue: 0x5F / 255)
-    static let glass900 = Color(red: 0x0E / 255, green: 0x15 / 255, blue: 0x13 / 255)
-    static let glass700 = Color(red: 0x1B / 255, green: 0x24 / 255, blue: 0x21 / 255)
+    static var phosphor: Color { ThemeModel.current.accent }
+    static var healthy: Color { ThemeModel.current.good }
+    static var amber: Color { ThemeModel.current.heat }
+    static var coral: Color { ThemeModel.current.warn }
+    static var glass900: Color { ThemeModel.current.bg }
+    static var glass700: Color { ThemeModel.current.card }
+    static var stroke: Color { ThemeModel.current.stroke }
 
     /// Same three states as the Mac: normal, elevated, critical.
     static func vital(_ stress: Double) -> Color {
-        stress < 0.45 ? .phosphor : stress < 0.75 ? .amber : .coral
+        stress < 0.45 ? .healthy : stress < 0.75 ? .amber : .coral
     }
     static func pulse(_ bpm: Double) -> Color {
-        bpm < 100 ? .phosphor : bpm < 140 ? .amber : .coral
+        bpm < 100 ? .healthy : bpm < 140 ? .amber : .coral
     }
 }
 
@@ -134,10 +135,69 @@ struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
     var body: some View {
+        let p = ThemeModel.current
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.glass700.opacity(0.75), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+            .background(p.card, in: RoundedRectangle(cornerRadius: p.radius + 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: p.radius + 6, style: .continuous).stroke(p.stroke.opacity(p.id == "mac1bit" ? 1 : 0.6), lineWidth: 1))
     }
+}
+
+struct SectionLabel: View {
+    let text: String
+    var body: some View {
+        Text(text.uppercased()).font(.caption.weight(.bold)).kerning(1).foregroundStyle(.secondary)
+    }
+}
+
+// MARK: - More of the Mac
+
+struct Glance: Decodable {
+    struct Span: Decodable, Identifiable { var id: String; var name: String; var secs: Double }
+    struct Day: Decodable, Identifiable { var label: String; var secs: Double; var id: String { label } }
+    struct Beat: Decodable, Identifiable { var t: Double; var bpm: Double; var id: Double { t } }
+    struct Hungry: Decodable, Identifiable { var name: String; var share: Double; var system: Bool?; var id: String { name } }
+    var todayTotal: Double
+    var today: [Span]
+    var week: [Day]
+    var heart: [Beat]
+    var heartAvg: Double
+    var heartPeak: Double
+    var beats: Double?
+    var hungry: [Hungry]
+    var boot: Double?
+    var setup: Double?
+    var model: String?
+    var chip: String?
+    var os: String?
+    var memTotal: Double?
+}
+
+struct SpaceTarget: Decodable, Identifiable {
+    struct Part: Decodable, Identifiable, Hashable { var path: String; var name: String; var size: Double; var id: String { path } }
+    var id: String
+    var title: String
+    var detail: String
+    var symbol: String
+    var safe: Bool
+    var size: Double
+    var count: Int
+    var parts: [Part]
+}
+
+struct Clip: Decodable, Identifiable {
+    var id: String
+    var kind: String
+    var text: String
+    var date: Double
+    var source: String?
+    var pinned: Bool?
+}
+
+struct Place: Decodable, Identifiable, Hashable {
+    var name: String
+    var path: String
+    var symbol: String
+    var id: String { path }
 }
