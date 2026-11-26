@@ -92,6 +92,7 @@ final class RemoteServer: ObservableObject {
     func start() {
         load()
         apply()
+        if UserDefaults.standard.bool(forKey: "remote.keepAwake") { setKeepAwake(true, by: nil) }
         vitalsSink = SystemMonitor.shared.$bpm
             .receive(on: DispatchQueue.main)        // @Published fires in willSet; hop once so we read the new values
             .sink { [weak self] _ in self?.pushVitals() }
@@ -171,7 +172,9 @@ final class RemoteServer: ObservableObject {
         connected = [:]
         pairing = nil
         PairingHUD.shared.hide()
+        let keep = UserDefaults.standard.bool(forKey: "remote.keepAwake")
         setKeepAwake(false, by: nil)
+        UserDefaults.standard.set(keep, forKey: "remote.keepAwake")
         Self.watching = false
         status = "Off"
     }
@@ -261,8 +264,26 @@ final class RemoteServer: ObservableObject {
     private var clipTimer: Timer?
     private var clipCount = NSPasteboard.general.changeCount
 
+    private var displayAssertion: IOPMAssertionID = 0
+
+    /// Wake a sleeping display and keep it on: a dark screen can't be streamed.
+    private func holdDisplay(_ on: Bool) {
+        if on {
+            var wake: IOPMAssertionID = 0
+            IOPMAssertionDeclareUserActivity("Triage remote desktop" as CFString, kIOPMUserActiveLocal, &wake)
+            if displayAssertion == 0 {
+                IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                            "Triage: remote desktop in use" as CFString, &displayAssertion)
+            }
+        } else if displayAssertion != 0 {
+            IOPMAssertionRelease(displayAssertion)
+            displayAssertion = 0
+        }
+    }
+
     func startWatching(_ s: RemoteSession) {
         let id = s.id
+        DispatchQueue.main.async { self.holdDisplay(true) }
         ScreenShare.shared.onFrame = { [weak self] frame in
             guard let self else { return }
             self.queue.async {
@@ -281,6 +302,7 @@ final class RemoteServer: ObservableObject {
             guard self.watchingSession == s.id else { return }
             ScreenShare.shared.onFrame = nil
             ScreenShare.shared.stop()
+            self.holdDisplay(false)
             self.watchingSession = nil
             self.watcher = nil
             self.record(s.deviceName, "Ended remote desktop")
@@ -292,6 +314,7 @@ final class RemoteServer: ObservableObject {
         guard let id = watchingSession else { return }
         ScreenShare.shared.onFrame = nil
         ScreenShare.shared.stop()
+        holdDisplay(false)
         record(watcher ?? "iPhone", "Remote desktop stopped from the Mac")
         watchingSession = nil
         watcher = nil
@@ -342,7 +365,9 @@ final class RemoteServer: ObservableObject {
 
     // MARK: Keep awake
 
+    /// Survives restarts and app updates: the Mac stays awake until someone turns it off.
     func setKeepAwake(_ on: Bool, by device: String?) {
+        UserDefaults.standard.set(on, forKey: "remote.keepAwake")
         guard on != keepAwake else { return }
         if on {
             let r = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,

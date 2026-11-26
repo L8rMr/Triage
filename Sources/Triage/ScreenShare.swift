@@ -6,6 +6,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import ApplicationServices
 import VideoToolbox
+import IOKit.pwr_mgt
 
 // MARK: - Remote desktop: the screen out, the mouse and keyboard in
 //
@@ -44,6 +45,8 @@ final class ScreenShare: NSObject, SCStreamOutput, SCStreamDelegate {
             throw RemoteError(message: "Allow Triage under Screen Recording on the Mac (System Settings › Privacy & Security), then try again.")
         }
         await stopAsync()
+        var wake: IOPMAssertionID = 0
+        IOPMAssertionDeclareUserActivity("Triage remote desktop" as CFString, kIOPMUserActiveLocal, &wake)
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let want = display ?? CGMainDisplayID()
         guard let d = content.displays.first(where: { $0.displayID == want }) ?? content.displays.first else {
