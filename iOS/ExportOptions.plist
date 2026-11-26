@@ -5,6 +5,7 @@
     <key>method</key><string>app-store-connect</string>
     <key>destination</key><string>upload</string>
     <key>signingStyle</key><string>automatic</string>
+    <key>teamID</key><string>5ZC643A2XK</string>
     <key>manageAppVersionAndBuildNumber</key><false/>
     <key>uploadSymbols</key><true/>
 </dict>
