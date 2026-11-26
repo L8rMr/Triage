@@ -81,6 +81,7 @@ struct ScanLook: Equatable {
     var enabled = false
     var softness: CGFloat = 0.35   // blur, in points
     var grain: CGFloat = 0.25      // 0…1 speckle in the ink
+    var weight: CGFloat = 0        // extra ink, % of the font size: scanned print runs heavier than the clean font
 }
 
 struct FontMatch: Identifiable, Hashable {
@@ -184,13 +185,13 @@ enum PatchMaker {
         } }
         let mean = paper.isEmpty ? Double(bg) : Double(paper.reduce(0, +)) / Double(paper.count)
         let sd = paper.isEmpty ? 4 : sqrt(paper.map { pow(Double($0) - mean, 2) }.reduce(0, +) / Double(paper.count))
-        let cut = bg - max(10, Int(sd * 2.5))
+        let cut = bg - max(6, Int(sd * 1.8))     // low enough to catch the grey halo around scanned letters
         var mask = [Bool](repeating: false, count: w * h)
         if bg - t > 18 {
             for yy in 0..<h { for xx in 0..<w where r.lum(x + xx, y + yy) < cut { mask[yy * w + xx] = true } }
         }
         // grow the mask about half a point so nothing of the old letters survives
-        let grow = max(2, Int(r.scale * 0.6 + 0.5))
+        let grow = max(3, Int(r.scale * 0.9 + 0.5))
         var grown = mask
         for yy in 0..<h { for xx in 0..<w where mask[yy * w + xx] {
             for dy in -grow...grow { for dx in -grow...grow {
@@ -224,6 +225,25 @@ enum PatchMaker {
                     out[di] = out[si]; out[di + 1] = out[si + 1]; out[di + 2] = out[si + 2]
                 } else { out[di] = bgByte; out[di + 1] = bgByte; out[di + 2] = bgByte }
             }
+        }
+        // only the erased ink is painted, with a soft edge: untouched paper shows the real page, so no box outline
+        let feather = max(2, Int(r.scale * 0.8))
+        var dist = [Int](repeating: Int.max / 2, count: w * h)
+        for i in 0..<(w * h) where grown[i] { dist[i] = 0 }
+        for _ in 0..<feather {   // a few passes of a cheap distance spread
+            for yy in 0..<h { for xx in 0..<w where dist[yy * w + xx] > 0 {
+                var m = dist[yy * w + xx]
+                if xx > 0 { m = min(m, dist[yy * w + xx - 1] + 1) }; if xx < w - 1 { m = min(m, dist[yy * w + xx + 1] + 1) }
+                if yy > 0 { m = min(m, dist[(yy - 1) * w + xx] + 1) }; if yy < h - 1 { m = min(m, dist[(yy + 1) * w + xx] + 1) }
+                dist[yy * w + xx] = m
+            } }
+        }
+        for i in 0..<(w * h) {
+            let d = dist[i]
+            let a = d == 0 ? 1.0 : d <= feather ? 1.0 - Double(d) / Double(feather + 1) : 0
+            let di = i * 4
+            for k in 0..<3 { out[di + k] = UInt8(Double(out[di + k]) * a) }
+            out[di + 3] = UInt8(255 * a)
         }
         guard let prov = CGDataProvider(data: Data(out) as CFData),
               let img = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
@@ -281,7 +301,7 @@ enum FontMatcher {
         return g
     }
 
-    struct Result { var matches: [FontMatch]; var size: CGFloat; var color: NSColor; var look: ScanLook; var ink: CGRect; var baseline: CGFloat = 0; var body: CGFloat = 0 }
+    struct Result { var matches: [FontMatch]; var size: CGFloat; var color: NSColor; var look: ScanLook; var ink: CGRect; var baseline: CGFloat = 0; var body: CGFloat = 0; var inkDensity: Double = 0; var densities: [String: Double] = [:] }
 
     /// Finds the font, size and ink color of one line of scanned text.
     static func analyze(_ r: PageRaster, line rect: CGRect, text: String, fonts: Bool = true) -> Result? {
@@ -302,6 +322,36 @@ enum FontMatcher {
             } else if l < bg - (bg - t) / 4 { mid += 1 }
         } }
         guard maxX > minX, maxY > minY else { return nil }
+        // keep only this line's own band of ink: OCR boxes often clip the bottoms or tops of the neighbouring lines,
+        // and that stray ink makes every line look taller and heavier (bold serifs win)
+        do {
+            var rowInk = [Int](repeating: 0, count: maxY - minY + 1)
+            for yy in minY...maxY { for xx in minX...maxX where r.lum(x + xx, y + yy) <= t { rowInk[yy - minY] += 1 } }
+            var bands: [(a: Int, b: Int, ink: Int)] = []
+            var start: Int? = nil, acc = 0
+            for (i, v) in rowInk.enumerated() {
+                if v > 0 { if start == nil { start = i; acc = 0 }; acc += v }
+                else if let s0 = start { bands.append((s0, i - 1, acc)); start = nil }
+            }
+            if let s0 = start { bands.append((s0, rowInk.count - 1, acc)) }
+            if bands.count > 1, let main = bands.max(by: { $0.ink < $1.ink }) {
+                let h = main.b - main.a + 1
+                var a = main.a, b = main.b
+                // re-attach i-dots, accents and descenders that sit just apart from the body
+                for bd in bands where bd.a != main.a {
+                    let gap = bd.a > b ? bd.a - b : a - bd.b
+                    let small = bd.b - bd.a + 1 < h / 2
+                    if gap <= max(2, h / 4) && small { a = min(a, bd.a); b = max(b, bd.b) }
+                }
+                let oldMin = minY
+                minY = oldMin + a; maxY = oldMin + b
+                minX = w; maxX = -1
+                for yy in minY...maxY { for xx in 0..<w where r.lum(x + xx, y + yy) <= t {
+                    if xx < minX { minX = xx }; if xx > maxX { maxX = xx }
+                } }
+                guard maxX > minX else { return nil }
+            }
+        }
         let color = n > 0 ? NSColor(srgbRed: CGFloat(rs / n) / 255, green: CGFloat(gs / n) / 255, blue: CGFloat(bs / n) / 255, alpha: 1)
                           : NSColor(white: CGFloat(t) / 510, alpha: 1)
         let inkW = maxX - minX + 1, inkH = maxY - minY + 1
@@ -369,7 +419,7 @@ enum FontMatcher {
         let tAspect = Double(inkW) / Double(inkH)
 
         let names = candidates
-        var slots = [(String, Double, CGFloat)?](repeating: nil, count: names.count)
+        var slots = [(String, Double, CGFloat, Double)?](repeating: nil, count: names.count)
         let lock = NSLock()
         DispatchQueue.concurrentPerform(iterations: names.count) { i in
             let name = names[i]
@@ -382,7 +432,7 @@ enum FontMatcher {
             let aspect = Double(bw) / Double(bh)
             let aspectScore = exp(-abs(log(aspect / tAspect)) * 7)
             // put the candidate through the same scanner blur, then trace it exactly like the scan
-            var score = -1.0
+            var score = -1.0, bestDensity = 0.0
             for radius in [0, 1, 2] {
                 let cov = radius == 0 ? cov0 : blurred(cov0, rw, rh, radius)
                 var hist = [Int](repeating: 0, count: 101)
@@ -399,20 +449,22 @@ enum FontMatcher {
                 for yy in by..<(by + bh) { for xx in bx..<(bx + bw) { mass += rc(xx, yy) } }
                 let density = Double(mass) / Double(bw * bh)
                 let densityScore = exp(-abs(log(max(density, 0.001) / max(tDensity, 0.001))) * 4)
-                score = max(score, max(0, shape) * 0.5 + aspectScore * 0.3 + densityScore * 0.2)
+                let sc = max(0, shape) * 0.5 + aspectScore * 0.3 + densityScore * 0.2
+                if sc > score { score = sc; bestDensity = density }
             }
             let size = (CGFloat(inkW) / r.scale) / (CGFloat(bw) / px)
-            lock.lock(); slots[i] = (name, score, size); lock.unlock()
+            lock.lock(); slots[i] = (name, score, size, bestDensity); lock.unlock()
         }
         var scored = slots.compactMap { $0 }
         // italics only when they clearly beat the best upright font (blurry scans fool slant)
         func isItalic(_ n: String) -> Bool { NSFontManager.shared.traits(of: NSFont(name: n, size: 12) ?? .systemFont(ofSize: 12)).contains(.italicFontMask) }
         let bestUpright = scored.filter { !isItalic($0.0) }.map(\.1).max() ?? 0
-        scored = scored.map { isItalic($0.0) && $0.1 < bestUpright + 0.06 ? ($0.0, $0.1 - 0.1, $0.2) : $0 }
+        scored = scored.map { isItalic($0.0) && $0.1 < bestUpright + 0.06 ? ($0.0, $0.1 - 0.1, $0.2, $0.3) : $0 }
         scored.sort { $0.1 > $1.1 }
         let best = scored.first
         return Result(matches: scored.prefix(8).map { FontMatch(fontName: $0.0, score: $0.1) },
-                      size: best?.2 ?? ink.height / 0.72, color: trueInk, look: look, ink: ink, baseline: baselineY, body: body)
+                      size: best?.2 ?? ink.height / 0.72, color: trueInk, look: look, ink: ink, baseline: baselineY, body: body,
+                      inkDensity: tDensity, densities: Dictionary(scored.map { ($0.0, $0.3) }, uniquingKeysWith: { a, _ in a }))
     }
 
     /// The whole run of ink on a text line. OCR boxes often miss the first or last characters.
@@ -742,14 +794,19 @@ enum PageAnalyzer {
         let strings = b.content.string.components(separatedBy: "\n")
         var results: [(FontMatcher.Result, String)] = []
         let order = Array(zip(b.lines, strings)).sorted { $0.1.count > $1.1.count }
+        // two readings: one clean word, and the whole line. The recognizer's word boxes are often a little off,
+        // which drags in pieces of neighbouring letters, so whichever reading fits its best font better wins.
+        var wordRes: [(FontMatcher.Result, String)] = []
         if let sw = b.sample, let r = FontMatcher.analyze(raster, line: sw.rect.insetBy(dx: -1, dy: -sw.rect.height * 0.1), text: sw.word) {
-            results.append((r, sw.word))
+            wordRes.append((r, sw.word))
         }
-        if results.isEmpty {
-            for (rect, s) in order.prefix(order.first.map { $0.1.count < 12 } == true ? 2 : 1) {
-                if let r = FontMatcher.analyze(raster, line: rect, text: s) { results.append((r, s)) }
-            }
+        var lineRes: [(FontMatcher.Result, String)] = []
+        for (rect, s) in order.prefix(order.first.map { $0.1.count < 12 } == true ? 2 : 1) {
+            if let r = FontMatcher.analyze(raster, line: rect, text: s) { lineRes.append((r, s)) }
         }
+        func top(_ rs: [(FontMatcher.Result, String)]) -> Double { rs.first?.0.matches.first?.score ?? 0 }
+        results = top(wordRes) > top(lineRes) ? wordRes : lineRes
+        if results.isEmpty { results = wordRes.isEmpty ? lineRes : wordRes }
         guard let main = results.first?.0 else { return }
         // combine scores across sampled lines
         var total: [String: Double] = [:]
@@ -758,9 +815,11 @@ enum PageAnalyzer {
         // a page is set in one or two typefaces: if the page's main font is nearly as good a fit, use it
         // (short lines like dates and codes give the matcher too little to go on and pick oddballs)
         let letters = b.content.string.filter { $0.isLetter }.count
-        let slack = letters < 6 ? 0.3 : 0.12          // digits and codes say little about the typeface
-        if let prefer, let top = ranked.first, top.fontName != prefer,
-           let i = ranked.firstIndex(where: { $0.fontName == prefer }), ranked[i].score >= top.score - slack {
+        let slack = letters < 6 ? 0.3 : 0.18          // digits and codes say little about the typeface
+        // by family, so a bold heading can take the page's typeface in bold
+        let fam: (String) -> String = { NSFont(name: $0, size: 12)?.familyName ?? $0 }
+        if let prefer, let top = ranked.first, fam(top.fontName) != fam(prefer),
+           let i = ranked.firstIndex(where: { fam($0.fontName) == fam(prefer) }), ranked[i].score >= top.score - slack {
             let m = ranked.remove(at: i); ranked.insert(FontMatch(fontName: m.fontName, score: max(m.score, top.score)), at: 0)
         }
         b.matches = Array(ranked.prefix(8))
@@ -802,6 +861,11 @@ enum PageAnalyzer {
         // on a scan, new text always gets the scanner look: crisp vector text never matches scanned ink,
         // even when the scan is clean enough that the measured blur and paper noise come out near zero
         if b.isScan { b.look.enabled = true; b.look.softness = max(b.look.softness, 0.3); b.look.grain = max(b.look.grain, 0.12) }
+        // how much heavier the scanned strokes are than the clean font, as extra outline (stroke ≈ 8.5% of the size)
+        if let d = results.compactMap({ $0.0.densities[fontName] }).first, d > 0.01 {
+            let gain = main.inkDensity / d
+            b.look.weight = min(3, max(0, (gain - 1) * 6)).rounded(toPlaces: 1)   // capped: a wrong guess shouldn't turn text bold
+        }
     }
 
     private static func matchVector(_ b: TextBlock) {
@@ -882,14 +946,22 @@ final class RichTextAnnotation: PDFAnnotation {
     private func scanImage() -> CGImage? {
         var hasher = Hasher()
         hasher.combine(content); hasher.combine(textRect.width); hasher.combine(textRect.height)
-        hasher.combine(look.softness); hasher.combine(look.grain)
+        hasher.combine(look.softness); hasher.combine(look.grain); hasher.combine(look.weight)
         let key = hasher.finalize()
         if let c = cache, c.key == key { return c.img }
         let s: CGFloat = 4
         let w = Int(textRect.width * s), h = Int(textRect.height * s)
         guard w > 0, h > 0, w * h < 40_000_000 else { return nil }
         var px = [UInt8](repeating: 0, count: w * h * 4)
-        let content = self.content, rect = textRect
+        let rect = textRect
+        var content = self.content
+        if look.weight > 0.05 {   // fill + outline in the same color thickens every stroke evenly
+            let m = NSMutableAttributedString(attributedString: content)
+            m.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: m.length)) { v, r, _ in
+                m.addAttributes([.strokeWidth: -look.weight, .strokeColor: (v as? NSColor) ?? NSColor.black], range: r)
+            }
+            content = m
+        }
         let ok = px.withUnsafeMutableBytes { b -> Bool in
             guard let c = CGContext(data: b.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }

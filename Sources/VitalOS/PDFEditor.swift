@@ -94,7 +94,7 @@ final class PDFEditorModel: ObservableObject {
         didSet {
             if oldValue != tool { commitEditing() }   // any tool change ends the edit, so nothing stays stuck "Editing"
             view?.editLayer.refresh()
-            if tool == .editText { analyzeVisible() }
+            if tool == .editText || tool == .editArea { analyzeVisible() }   // Edit Area learns the page's fonts up front
         }
     }
     @Published var ribbon: RibbonTab = .edit { didSet { if oldValue != ribbon { commitEditing() } } }
@@ -393,10 +393,11 @@ final class PDFEditorModel: ObservableObject {
                 for m in c.matches.prefix(3) { votes[m.fontName, default: 0] += m.score * weight }
             }
             guard let house = votes.max(by: { $0.value < $1.value })?.key else { return }
-            for (b, c, raw) in copies where c.matches.first?.fontName != house {
+            let fam: (String?) -> String? = { $0.flatMap { NSFont(name: $0, size: 12)?.familyName ?? $0 } }
+            for (b, c, raw) in copies where fam(c.matches.first?.fontName) != fam(house) {
                 let d = raw
                 PageAnalyzer.match(d, raster: raster, prefer: house)
-                guard d.matches.first?.fontName == house else { continue }
+                guard fam(d.matches.first?.fontName) == fam(house) else { continue }
                 DispatchQueue.main.async {
                     guard b.annotation == nil else { return }
                     b.lines = d.lines; b.textRect = d.textRect; b.content = d.content
@@ -472,10 +473,41 @@ final class PDFEditorModel: ObservableObject {
         commitEditing()
         guard let raster = self.raster(for: page) else { status = "Couldn't read this page."; return }
         let scan = PageAnalyzer.isScan(page)
+        analyze(page)
         busy = "Reading the area…"
-        Work.heavy.addOperation {
+        DispatchQueue.global(qos: .userInitiated).async {
+            // the page's own lines tell us its typeface; one line alone can fool the matcher (a sans line read as a slab serif)
+            let k = ObjectIdentifier(page)
+            let deadline = Date().addingTimeInterval(15)
+            while Date() < deadline {
+                let ready = DispatchQueue.main.sync { () -> Bool in
+                    guard let list = self.blocks[k] else { return false }
+                    return list.isEmpty || list.allSatisfy { $0.prepared || $0.annotation != nil }
+                }
+                if ready { break }
+                DispatchQueue.main.async { self.busy = "Learning this page's fonts…" }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            DispatchQueue.main.async { self.busy = "Reading the area…" }
             let b = PageAnalyzer.areaBlock(page, rect: rect, raster: raster)
-            if !b.lines.isEmpty { PageAnalyzer.match(b, raster: raster, prefer: self.pageFont(page, raster: raster)) }
+            // lines the page analysis already matched (they saw the whole line, with context) beat a fresh guess from a box
+            let known: [TextBlock] = DispatchQueue.main.sync {
+                (self.blocks[k] ?? []).filter { blk in
+                    guard blk.prepared, blk.annotation == nil, blk.content.length > 0 else { return false }
+                    let i = blk.area.intersection(rect)
+                    return !i.isNull && i.width * i.height > blk.area.width * blk.area.height * 0.25
+                }
+            }
+            if let main = known.max(by: { $0.content.length < $1.content.length }) {
+                let style = main.content.attributes(at: 0, effectiveRange: nil)
+                let text = b.content.length > 0 ? b.content.string : known.map(\.content.string).joined(separator: "\n")
+                b.content = NSAttributedString(string: text, attributes: style)
+                b.lines = known.flatMap(\.lines) + b.lines
+                b.textRect = known.map(\.textRect).reduce(main.textRect) { $0.union($1) }
+                b.matches = main.matches; b.look = main.look
+            } else if !b.lines.isEmpty {
+                PageAnalyzer.match(b, raster: raster, prefer: self.pageFont(page, raster: raster))
+            }
             if b.content.length == 0 || b.lines.isEmpty {
                 // nothing readable inside: an empty box in the page's own font, sized to the area
                 let size = max(6, min(rect.height * 0.7, 36)).rounded(toPlaces: 1)
@@ -1959,6 +1991,8 @@ struct FormatPanel: View {
                         slider("Softness", Binding(get: { m.look.softness * 100 }, set: { v in var l = m.look; l.softness = v / 100; m.setLook(l) }), 0...150, unit: "")
                             .disabled(!m.look.enabled)
                         slider("Grain", Binding(get: { m.look.grain * 100 }, set: { v in var l = m.look; l.grain = v / 100; m.setLook(l) }), 0...100, unit: "")
+                            .disabled(!m.look.enabled)
+                        slider("Ink weight", Binding(get: { m.look.weight * 10 }, set: { v in var l = m.look; l.weight = v / 10; m.setLook(l) }), 0...60, unit: "")
                             .disabled(!m.look.enabled)
                         Text("Softness and speckle are measured from the scan. You'll see them when you click outside the box.")
                             .font(.ui(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
