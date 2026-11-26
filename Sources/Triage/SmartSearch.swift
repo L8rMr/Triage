@@ -29,7 +29,7 @@ struct SmartQuery {
             || minSize != nil || maxSize != nil || from != nil || !exts.isEmpty || scope != nil
     }
 
-    /// What VitalOS understood, shown as chips under the search field.
+    /// What Triage understood, shown as chips under the search field.
     var chips: [String] {
         var c: [String] = []
         c += kinds.map(\.label)
@@ -435,7 +435,7 @@ enum Calc {
 final class SmartSearch: ObservableObject {
     enum Category: String, CaseIterable {
         case recent = "Jump back in"
-        case actions = "VitalOS"
+        case actions = "Triage"
         case top = "Top hit"
         case apps = "Applications"
         case folders = "Folders"
@@ -478,7 +478,7 @@ final class SmartSearch: ObservableObject {
     @Published private(set) var history: [String] = UserDefaults.standard.stringArray(forKey: "vitalos.searchHistory") ?? []
 
     var onClose: (() -> Void)?
-    var onOpenInVitalOS: ((URL) -> Void)?
+    var onOpenInTriage: ((URL) -> Void)?
 
     private let query = NSMetadataQuery()
     private var work: DispatchWorkItem?
@@ -644,7 +644,7 @@ final class SmartSearch: ObservableObject {
         publish(secs)
     }
 
-    /// Puts VitalOS actions first, numbers every row for keyboard moves, keeps the selection.
+    /// Puts Triage actions first, numbers every row for keyboard moves, keeps the selection.
     private func publish(_ fileSections: [Section]) {
         var secs = fileSections
         if !recentsMode, !commands.isEmpty {
@@ -689,7 +689,7 @@ final class SmartSearch: ObservableObject {
         UserDefaults.standard.set(history, forKey: "vitalos.searchHistory")
     }
 
-    func activate(reveal: Bool = false, inVitalOS: Bool = false) {
+    func activate(reveal: Bool = false, inTriage: Bool = false) {
         if selected == -1, let m = mathResult {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(m.replacingOccurrences(of: ",", with: ""), forType: .string)
@@ -700,7 +700,7 @@ final class SmartSearch: ObservableObject {
         if let c = hit.command { onClose?(); c.run(); return }
         remember()
         if reveal { NSWorkspace.shared.activateFileViewerSelecting([hit.url]) }
-        else if inVitalOS { onOpenInVitalOS?(hit.url) }
+        else if inTriage { onOpenInTriage?(hit.url) }
         else { NSWorkspace.shared.open(hit.url) }
         onClose?()
     }
@@ -729,7 +729,7 @@ final class SmartSearch: ObservableObject {
         case 125: move(1); return true                    // ↓
         case 126: move(-1); return true                   // ↑
         case 36, 76:                                      // ↩
-            activate(reveal: f.contains(.command), inVitalOS: f.contains(.option)); return true
+            activate(reveal: f.contains(.command), inTriage: f.contains(.option)); return true
         case 53:                                          // esc
             if text.isEmpty { onClose?() } else { text = "" }
             return true

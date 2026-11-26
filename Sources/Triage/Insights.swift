@@ -310,7 +310,7 @@ struct GlanceDashboard: View {
                 }
             } else {
                 Text("Nothing yet").font(.ui(size: 20, weight: .bold, design: .rounded))
-                Text("VitalOS notes which app works your Mac hardest as the week goes on.").font(.ui(size: 12)).foregroundStyle(.secondary)
+                Text("Triage notes which app works your Mac hardest as the week goes on.").font(.ui(size: 12)).foregroundStyle(.secondary)
             }
             if system > 0 {
                 HStack(spacing: 6) {

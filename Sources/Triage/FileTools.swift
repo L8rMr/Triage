@@ -766,7 +766,7 @@ struct AutopilotView: View {
     @State private var editing: AutoRule?
 
     var body: some View {
-        ToolPage(tool: .autopilot, subtitle: "Rules check their folders every 15 minutes while VitalOS is open. Every run can be undone.", trailing: {
+        ToolPage(tool: .autopilot, subtitle: "Rules check their folders every 15 minutes while Triage is open. Every run can be undone.", trailing: {
             HStack {
                 Menu("Add from template") {
                     ForEach(RuleStore.templates) { t in Button(t.name) { var n = t; n.id = UUID(); store.rules.append(n) } }

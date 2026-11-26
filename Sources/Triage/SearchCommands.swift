@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import CoreAudio
 
-// MARK: - VitalOS actions you can run from search
+// MARK: - Triage actions you can run from search
 
 struct SearchCommand: Identifiable {
     let id: String
@@ -13,7 +13,7 @@ struct SearchCommand: Identifiable {
     let run: () -> Void
 }
 
-extension Notification.Name { static let vitalOSGo = Notification.Name("VitalOSGo") }
+extension Notification.Name { static let vitalOSGo = Notification.Name("TriageGo") }
 
 enum SearchCommands {
     /// Opens the main window on a page: "home", "heart", "apps", "hardware", "files", "utilities", or a ToolID raw value.
@@ -28,7 +28,7 @@ enum SearchCommands {
 
     static func all() -> [SearchCommand] {
         var c: [SearchCommand] = [
-            .init(id: "home", title: "Home", subtitle: "Open VitalOS", symbol: "house.fill", keywords: ["home", "vitalos", "open"]) { go("home") },
+            .init(id: "home", title: "Home", subtitle: "Open Triage", symbol: "house.fill", keywords: ["home", "triage", "vitalos", "open"]) { go("home") },
             .init(id: "heart", title: "Heart", subtitle: "What's slowing your Mac down", symbol: "heart.fill", keywords: ["heart", "slow", "why", "performance", "cpu", "memory", "ram", "activity"]) { go("heart") },
             .init(id: "apps", title: "Apps", subtitle: "Everything running, with quit buttons", symbol: "square.grid.2x2.fill", keywords: ["apps", "running", "processes", "task", "manager"]) { go("apps") },
             .init(id: "hardware", title: "Hardware", subtitle: "Battery, disk, temperature", symbol: "cpu", keywords: ["hardware", "battery", "temperature", "heat", "disk"]) { go("hardware") },
@@ -54,7 +54,7 @@ enum SearchCommands {
             },
         ]
         for t in ToolID.allCases {
-            c.append(.init(id: "tool-" + t.rawValue, title: t.title, subtitle: "VitalOS tool", symbol: "wrench.and.screwdriver.fill",
+            c.append(.init(id: "tool-" + t.rawValue, title: t.title, subtitle: "Triage tool", symbol: "wrench.and.screwdriver.fill",
                            keywords: t.title.lowercased().split(separator: " ").map(String.init) + [t.rawValue]) { go(t.rawValue) })
         }
         for th in AppTheme.all {
@@ -77,7 +77,7 @@ enum SearchCommands {
         if let verb = words.first, ["quit", "close", "kill", "force"].contains(verb), words.count >= 2 {
             let name = words.dropFirst().filter { $0 != "quit" }.joined(separator: " ")
             for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
-                guard let n = app.localizedName, n.lowercased().contains(name), app.bundleIdentifier != "com.alenlvovich.vitalos" else { continue }
+                guard let n = app.localizedName, n.lowercased().contains(name), app.bundleIdentifier != "com.alenlvovich.triage" else { continue }
                 let force = verb == "force" || verb == "kill"
                 out.append(.init(id: "quit-\(app.processIdentifier)", title: "\(force ? "Force quit" : "Quit") \(n)", subtitle: "Running now", symbol: "xmark.circle.fill", keywords: []) {
                     if force { app.forceTerminate() } else { app.terminate() }

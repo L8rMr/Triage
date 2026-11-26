@@ -20,7 +20,7 @@ enum TourScript {
     }
 
     static let quick: [TourStep] = [
-        TourStep(route: .home, symbol: "heart.text.square.fill", title: "Welcome to VitalOS",
+        TourStep(route: .home, symbol: "heart.text.square.fill", title: "Welcome to Triage",
                  body: "An activity monitor and a file manager in one window. Your Mac gets a pulse, and your files get a smarter home.",
                  tip: "This takes about two minutes. Use the arrows or press Skip anytime."),
         TourStep(route: .heart, symbol: "waveform.path.ecg", title: "Your Mac's heartbeat",
@@ -33,7 +33,7 @@ enum TourScript {
                  body: "A sidebar with your folders, cloud drives, disks and servers, plus real previews, sorting, filters and smart grouping. Right-click anything for more.",
                  tip: "⌘D splits into two panes. Space previews the selected file."),
         TourStep(route: .search, symbol: "sparkle.magnifyingglass", title: "Search the way you talk",
-                 body: "The search field sits at the top of the sidebar (⌘K). Try \u{201C}pdfs from last week\u{201D}. It also does math, converts money (\u{201C}100 usd to eur\u{201D}) and runs VitalOS actions (\u{201C}quit chrome\u{201D}, \u{201C}wifi off\u{201D}).",
+                 body: "The search field sits at the top of the sidebar (⌘K). Try \u{201C}pdfs from last week\u{201D}. It also does math, converts money (\u{201C}100 usd to eur\u{201D}) and runs Triage actions (\u{201C}quit chrome\u{201D}, \u{201C}wifi off\u{201D}).",
                  tip: "⌥Space opens the same search from any app.",
                  action: { $0.search.text = "pdfs from last week" }),
         TourStep(route: .clean, symbol: "externaldrive.badge.minus", title: "Free up space safely",
@@ -43,7 +43,7 @@ enum TourScript {
                  body: "15 tools in one place: Clipboard, PDF Editor, Converter, Disk Map, Duplicates, App Uninstaller, Dev Servers & Ports, Health History and more.",
                  tip: "Star a tool to keep it in the sidebar. ⌘⇧2 grabs text from anywhere on screen."),
         TourStep(route: .home, symbol: "menubar.rectangle", title: "The menu bar panel",
-                 body: "Click VitalOS in the menu bar: Vitals with one-tap fixes, Connectivity for Wi-Fi and Bluetooth batteries, and Sound with a volume for every app and a mic mute.",
+                 body: "Click Triage in the menu bar: Vitals with one-tap fixes, Connectivity for Wi-Fi and Bluetooth batteries, and Sound with a volume for every app and a mic mute.",
                  tip: "The slider button in the panel picks which numbers sit in the menu bar."),
         TourStep(route: .home, symbol: "paintpalette", title: "Make it yours",
                  body: "Settings › Appearance has 10 themes, from Windows 95 and Aqua to a green CRT terminal, plus accent color, text size and a Touch layout.",
@@ -69,7 +69,7 @@ enum TourScript {
                  body: "HR is the processor, BP is memory pressure, TEMP is heat, SpO₂ is disk space and PWR is battery. Each has a 90-second chart and its biggest user.",
                  tip: "Click a channel for the full breakdown and how it's scored."),
         TourStep(route: .heart, symbol: "cross.case", title: "Suggestions when it's strained",
-                 body: "When the heart rate climbs, VitalOS lists specific fixes: quit the hungriest app, close heavy browser tabs, restart to clear swap, let it cool, free disk space."),
+                 body: "When the heart rate climbs, Triage lists specific fixes: quit the hungriest app, close heavy browser tabs, restart to clear swap, let it cool, free disk space."),
         TourStep(route: .apps, symbol: "square.grid.2x2", title: "Apps",
                  body: "60 apps instead of 1,000 processes. Sort by CPU or memory, filter by name, click a row to see its processes, hover to quit.",
                  tip: "Click the CPU or Memory card for a ranked breakdown."),
@@ -96,7 +96,7 @@ enum TourScript {
                  body: "Select any file and the panel on the right tells you whether it's safe to delete and why: who uses it, when you last opened it, whether it's in git or the cloud, or an app's leftovers.",
                  tip: "Risky deletes stop and show you the reasons first. List view has a Delete? column you can filter."),
         TourStep(route: .search, symbol: "sparkle.magnifyingglass", title: "Smart Search",
-                 body: "Search your whole Mac in plain English. VitalOS understands kinds (pdfs, screenshots, apps), dates (today, last week, in March, in 2025), sizes (big, over 500mb) and places (in downloads).",
+                 body: "Search your whole Mac in plain English. Triage understands kinds (pdfs, screenshots, apps), dates (today, last week, in March, in 2025), sizes (big, over 500mb) and places (in downloads).",
                  tip: "The green chips show what it understood.",
                  action: { $0.search.text = "screenshots this week" }),
         TourStep(route: .search, symbol: "link", title: "Where a file came from",
@@ -109,11 +109,11 @@ enum TourScript {
                  body: "Type math like 1200*12*0.0725, or money like \u{201C}100 usd to eur\u{201D}, \u{201C}$50 in rubles\u{201D} or \u{201C}€20\u{201D}. About 30 currencies, live rates refreshed every 6 hours. Return copies the answer.",
                  action: { $0.search.text = "100 usd to eur" }),
         TourStep(route: .search, symbol: "bolt.circle", title: "Actions from search",
-                 body: "VitalOS actions show up above your files: open any page or tool, \u{201C}quit chrome\u{201D}, \u{201C}volume 30\u{201D}, \u{201C}wifi off\u{201D}, \u{201C}mute mic\u{201D}, \u{201C}theme braun\u{201D}, quit idle apps or set a restart reminder.",
+                 body: "Triage actions show up above your files: open any page or tool, \u{201C}quit chrome\u{201D}, \u{201C}volume 30\u{201D}, \u{201C}wifi off\u{201D}, \u{201C}mute mic\u{201D}, \u{201C}theme braun\u{201D}, quit idle apps or set a restart reminder.",
                  tip: "Press Return on an action to do it.",
                  action: { $0.search.text = "quit" }),
         TourStep(route: .search, symbol: "command", title: "⌥Space from anywhere",
-                 body: "The same search floats over any app, Spotlight-style, with a live preview pane. ⌥Return opens the result right here in VitalOS.",
+                 body: "The same search floats over any app, Spotlight-style, with a live preview pane. ⌥Return opens the result right here in Triage.",
                  action: { $0.search.text = "" }),
         TourStep(route: .clean, symbol: "externaldrive.badge.minus", title: "Free Up Space",
                  body: "Ten suggestions: Xcode and simulator caches, npm, pip and Homebrew downloads, logs, old and huge downloads, archives and the Trash. Safe items clear in one click.",
@@ -156,19 +156,19 @@ enum TourScript {
         TourStep(route: .tool(.autopilot), symbol: "wand.and.stars", title: "Folder Autopilot",
                  body: "Rules that tidy folders on their own every 15 minutes, like moving old screenshots off the Desktop. Start from a template."),
         TourStep(route: .home, symbol: "arrow.left.arrow.right", title: "Back and forward",
-                 body: "VitalOS remembers where you've been, pages and folders alike. Go back with the arrows by the ?, your mouse's side buttons, a three-finger swipe, or ⌘[ and ⌘]."),
+                 body: "Triage remembers where you've been, pages and folders alike. Go back with the arrows by the ?, your mouse's side buttons, a three-finger swipe, or ⌘[ and ⌘]."),
         TourStep(route: .home, symbol: "menubar.rectangle", title: "Menu bar",
                  body: "The ♥ shows your Mac's heart rate. Click the slider button in the panel, or go to Settings › Menu Bar, to pick what sits up top: bpm, CPU, memory, download speed, disk, heat, battery, Wi-Fi, volume, headphone battery or mouse battery.",
-                 tip: "Closing the window keeps VitalOS running up there."),
+                 tip: "Closing the window keeps Triage running up there."),
         TourStep(route: .home, symbol: "paintpalette", title: "Themes",
-                 body: "Settings › Appearance: VitalOS, Apple Pro, Aqua, Windows 95, Windows XP, Windows 11, Macintosh, Linux, Braun and Phosphor. Each changes colors, type, cards, buttons and the window frame.",
+                 body: "Settings › Appearance: Triage, Apple Pro, Aqua, Windows 95, Windows XP, Windows 11, Macintosh, Linux, Braun and Phosphor. Each changes colors, type, cards, buttons and the window frame.",
                  tip: "Turn off Theme window frames to keep the usual macOS buttons.",
                  action: { _ in NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }),
         TourStep(route: .home, symbol: "slider.horizontal.3", title: "Settings",
-                 body: "Accent color, Auto/Light/Dark, Compact/Comfortable/Touch, text size and Reduce motion live in Appearance. Heart & Readings sets how often VitalOS checks your Mac. Files, Menu Bar, Privacy, Shortcuts and Advanced are there too.",
-                 tip: "⌘, opens Settings from anywhere in VitalOS."),
+                 body: "Accent color, Auto/Light/Dark, Compact/Comfortable/Touch, text size and Reduce motion live in Appearance. Heart & Readings sets how often Triage checks your Mac. Files, Menu Bar, Privacy, Shortcuts and Advanced are there too.",
+                 tip: "⌘, opens Settings from anywhere in Triage."),
         TourStep(route: .heart, symbol: "leaf", title: "Light on your Mac",
-                 body: "VitalOS slows its readings to every 5 seconds when no window is showing and stops the heart line when nobody can see it. Settings › Advanced shows how much memory VitalOS itself is using."),
+                 body: "Triage slows its readings to every 5 seconds when no window is showing and stops the heart line when nobody can see it. Settings › Advanced shows how much memory Triage itself is using."),
         TourStep(route: .home, symbol: "questionmark.circle", title: "That's everything",
                  body: "The ? in the top-right corner lists every feature and shortcut, with a Show me button for each. You can replay either tour from there."),
     ]
@@ -249,7 +249,7 @@ enum HelpCatalog {
         HelpItem(section: "Heart", symbol: "stethoscope", title: "What's behind each vital",
                  detail: "Click a channel on Heart or a card on Hardware or Apps for its breakdown and scoring.", route: .heart),
         HelpItem(section: "Heart", symbol: "cross.case", title: "Suggestions",
-                 detail: "When it's working hard, VitalOS lists the fixes that would help most, with buttons.", route: .heart),
+                 detail: "When it's working hard, Triage lists the fixes that would help most, with buttons.", route: .heart),
         HelpItem(section: "Heart", symbol: "waveform.path.ecg.rectangle", title: "Sidebar pulse",
                  detail: "Beats at your Mac's heart rate. Green calm, orange busy, red strained. Click it for Heart."),
         HelpItem(section: "Vitals", symbol: "square.grid.2x2", title: "Apps",
@@ -279,9 +279,9 @@ enum HelpCatalog {
         HelpItem(section: "Search", symbol: "dollarsign.arrow.circlepath", title: "Currency converter",
                  detail: "100 usd to eur · $50 in rubles · €20 · 5000 yen. About 30 currencies with live rates, refreshed every 6 hours. Return copies the answer."),
         HelpItem(section: "Search", symbol: "bolt.circle", title: "Actions",
-                 detail: "Run VitalOS from search: open any page or tool, quit chrome, force quit zoom, volume 30, wifi on/off, bluetooth on/off, mute mic, theme xp, quit idle apps, restart reminder, show hidden files."),
+                 detail: "Run Triage from search: open any page or tool, quit chrome, force quit zoom, volume 30, wifi on/off, bluetooth on/off, mute mic, theme xp, quit idle apps, restart reminder, show hidden files."),
         HelpItem(section: "Search", symbol: "keyboard", title: "Result shortcuts",
-                 detail: "Return open · ⌘Return show in Finder · ⌥Return open in VitalOS · ⌘Y Quick Look · ⇧⌘C copy path."),
+                 detail: "Return open · ⌘Return show in Finder · ⌥Return open in Triage · ⌘Y Quick Look · ⇧⌘C copy path."),
         HelpItem(section: "Files", symbol: "folder", title: "Browse files",
                  detail: "Glass folder cards with item counts, real thumbnails, grid or list, git branch in code folders.", keys: "⌘4", route: .files),
         HelpItem(section: "Files", symbol: "line.3.horizontal.decrease", title: "Filter",
@@ -315,7 +315,7 @@ enum HelpCatalog {
                  keys: t == .clipboard ? "⌘⇧2 · ⌥⇧V" : nil, route: t.route)
     } + [
         HelpItem(section: "Appearance", symbol: "paintpalette", title: "Themes",
-                 detail: "10 looks in Settings › Appearance: VitalOS, Apple Pro, Aqua, Windows 95, Windows XP, Windows 11, Macintosh, Linux, Braun and Phosphor.", keys: "⌘,"),
+                 detail: "10 looks in Settings › Appearance: Triage, Apple Pro, Aqua, Windows 95, Windows XP, Windows 11, Macintosh, Linux, Braun and Phosphor.", keys: "⌘,"),
         HelpItem(section: "Appearance", symbol: "circle.lefthalf.filled", title: "Mode and accent color",
                  detail: "Auto, Light or Dark for themes that support both, and an accent color that overrides the theme's own."),
         HelpItem(section: "Appearance", symbol: "hand.tap", title: "Density and text size",
@@ -326,10 +326,10 @@ enum HelpCatalog {
                  detail: "Stops the moving heart line and the CRT glow."),
         HelpItem(section: "Settings", symbol: "gearshape", title: "All settings",
                  detail: "Appearance, General (open at login), Menu Bar, Heart & Readings, Files, Privacy & Permissions, Shortcuts and Advanced.", keys: "⌘,"),
-        HelpItem(section: "Settings", symbol: "speedometer", title: "How often VitalOS checks",
+        HelpItem(section: "Settings", symbol: "speedometer", title: "How often Triage checks",
                  detail: "Settings › Heart & Readings: every 1, 1.5 or 3 seconds with a window open, and 5, 15 or 60 seconds in the background."),
-        HelpItem(section: "Settings", symbol: "leaf", title: "VitalOS's own usage",
-                 detail: "Settings › Advanced shows VitalOS's memory use. The usage log writes its CPU and memory to a file once a minute."),
+        HelpItem(section: "Settings", symbol: "leaf", title: "Triage's own usage",
+                 detail: "Settings › Advanced shows Triage's memory use. The usage log writes its CPU and memory to a file once a minute."),
         HelpItem(section: "Getting around", symbol: "arrow.left.arrow.right", title: "Back and forward",
                  detail: "Like a browser: the arrows by the ?, mouse side buttons, three-finger swipe.", keys: "⌘[  ⌘]"),
         HelpItem(section: "Getting around", symbol: "sidebar.left", title: "The icon rail",
@@ -354,7 +354,7 @@ struct HelpCenter: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Everything VitalOS can do").font(.ui(size: 22, weight: .bold, design: .rounded))
+                    Text("Everything Triage can do").font(.ui(size: 22, weight: .bold, design: .rounded))
                     Text("Take a tour, or find a feature and jump straight to it.").font(.ui(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -455,6 +455,6 @@ struct HelpButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("How to use VitalOS (⌘?)")
+        .help("How to use Triage (⌘?)")
     }
 }

@@ -60,7 +60,7 @@ enum Cleaner {
                         symbol: "calendar.badge.clock", safe: false, source: .files(old)),
             CleanTarget(id: "bigdl", title: "Large recent downloads", detail: "Files over 500 MB from the last 90 days.",
                         symbol: "externaldrive.badge.exclamationmark", safe: false, source: .files(big)),
-            CleanTarget(id: "trash", title: "Trash", detail: "Emptying is permanent. VitalOS will ask Finder to do it.",
+            CleanTarget(id: "trash", title: "Trash", detail: "Emptying is permanent. Triage will ask Finder to do it.",
                         symbol: "trash", safe: false, source: .trash),
         ]
     }

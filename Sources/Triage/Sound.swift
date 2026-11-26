@@ -50,7 +50,7 @@ enum CA {
         ids(system, kAudioHardwarePropertyDevices).compactMap { d in
             guard !ids(d, kAudioDevicePropertyStreams, kAudioDevicePropertyScopeOutput).isEmpty,
                   let name = string(d, kAudioObjectPropertyName) else { return nil }
-            if name.hasPrefix("VitalOS") { return nil }
+            if name.hasPrefix("Triage") { return nil }
             return (d, name)
         }
     }
@@ -89,7 +89,7 @@ final class AppVolumeTap {
         let outDev = CA.defaultOutput
         guard let outUID = CA.string(outDev, kAudioDevicePropertyDeviceUID) else { stop(); return nil }
         let agg: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "VitalOS Volume",
+            kAudioAggregateDeviceNameKey: "Triage Volume",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceMainSubDeviceKey: outUID,
             kAudioAggregateDeviceIsPrivateKey: true,
@@ -249,7 +249,7 @@ final class MixerModel: ObservableObject {
             problem = nil
         } else {
             taps[a.id] = nil
-            problem = "macOS blocked per-app volume. Allow VitalOS under Privacy & Security → Screen & System Audio Recording, then try again."
+            problem = "macOS blocked per-app volume. Allow Triage under Privacy & Security → Screen & System Audio Recording, then try again."
         }
     }
 

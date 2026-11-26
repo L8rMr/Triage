@@ -1,11 +1,11 @@
 #!/bin/bash
-# Builds a Release VitalOS.app, installs it in /Applications, and makes a drag-to-install DMG in ./dist.
+# Builds a Release Triage.app, installs it in /Applications, and makes a drag-to-install DMG in ./dist.
 # Needs Xcode or the Command Line Tools (Swift 5.9+).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NAME="VitalOS"
-BUNDLE_ID="com.alenlvovich.vitalos"
+NAME="Triage"
+BUNDLE_ID="com.alenlvovich.triage"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist 2>/dev/null || echo "1.0")
 BUILD=$(date +%Y%m%d%H%M)
 
@@ -43,6 +43,9 @@ codesign --verify --deep --strict "$APP"
 
 echo "▸ Installing in /Applications…"
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
+# the app used to be called VitalOS: quit it and retire its copies so only Triage is left
+osascript -e 'tell application id "com.alenlvovich.vitalos" to quit' >/dev/null 2>&1 || true
+rm -rf "/Applications/VitalOS.app" "$HOME/Applications/VitalOS.app"
 sleep 1
 rm -rf "/Applications/$NAME.app"
 ditto "$APP" "/Applications/$NAME.app"

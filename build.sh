@@ -1,14 +1,14 @@
 #!/bin/bash
-# Builds VitalOS.app into ./build and opens it. Needs Xcode or the Command Line Tools (Swift 5.9+).
+# Builds Triage.app into ./build and opens it. Needs Xcode or the Command Line Tools (Swift 5.9+).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 swift build -c release
 
-APP="build/VitalOS.app"
+APP="build/Triage.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/VitalOS "$APP/Contents/MacOS/VitalOS"
+cp .build/release/Triage "$APP/Contents/MacOS/Triage"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"   # theme fonts
 

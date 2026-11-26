@@ -5,12 +5,12 @@ import Foundation
 let infoPlist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Resources/Info.plist").path
 
 let package = Package(
-    name: "VitalOS",
+    name: "Triage",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "VitalOS",
-            path: "Sources/VitalOS",
+            name: "Triage",
+            path: "Sources/Triage",
             linkerSettings: [
                 .linkedFramework("IOKit"),
                 .linkedFramework("QuickLookThumbnailing"),

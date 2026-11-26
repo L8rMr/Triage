@@ -153,7 +153,7 @@ struct WiFiPanel: View {
             }
             if wifi.powerOn && wifi.ssid == nil && wifi.rssi != 0 && !wifi.locationAllowed {
                 HStack {
-                    Text("macOS hides network names until VitalOS can use Location.").font(.ui(size: 10)).foregroundStyle(.secondary)
+                    Text("macOS hides network names until Triage can use Location.").font(.ui(size: 10)).foregroundStyle(.secondary)
                     Button("Allow") { wifi.askForLocation() }.controlSize(.mini)
                 }
             }

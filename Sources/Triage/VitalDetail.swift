@@ -400,7 +400,7 @@ enum MenuBarText {
             case nil: return nil
             }
         }
-        return parts.isEmpty && !icon ? "VitalOS" : parts.joined(separator: "  ")
+        return parts.isEmpty && !icon ? "Triage" : parts.joined(separator: "  ")
     }
 
     /// "Alen’s AirPods Pro" → "AirPods", "MX Master 3S" → "MX"

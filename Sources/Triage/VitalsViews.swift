@@ -405,7 +405,7 @@ enum MenuBarImage {
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let t = text as NSString
         let ts = text.isEmpty ? .zero : t.size(withAttributes: attrs)
-        let heart = icon ? NSImage(systemSymbolName: "heart.fill", accessibilityDescription: "VitalOS")?
+        let heart = icon ? NSImage(systemSymbolName: "heart.fill", accessibilityDescription: "Triage")?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold)) : nil
         let hs = heart?.size ?? .zero
         let gap: CGFloat = heart != nil && !text.isEmpty ? 4 : 0
@@ -758,7 +758,7 @@ struct MenuPanel: View {
                 .help("Smart Search (⌥Space)")
             SettingsLink { Image(systemName: "gearshape") }
                 .help("Settings")
-            Button("Open VitalOS") { openMain() }
+            Button("Open Triage") { openMain() }
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
         }

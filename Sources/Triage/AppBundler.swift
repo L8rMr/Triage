@@ -1,8 +1,8 @@
 import AppKit
 
 /// macOS only gives some permissions (Location above all) to real .app bundles.
-/// When VitalOS is launched as a bare binary (from Xcode or `swift run`), it wraps itself
-/// into ~/Applications/VitalOS.app, launches that, and quits. Set VITALOS_NO_BUNDLE=1 to skip.
+/// When Triage is launched as a bare binary (from Xcode or `swift run`), it wraps itself
+/// into ~/Applications/Triage.app, launches that, and quits. Set VITALOS_NO_BUNDLE=1 to skip.
 enum AppBundler {
     static var isBundled: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
@@ -17,12 +17,12 @@ enum AppBundler {
         guard fm.fileExists(atPath: plist.path) else { return false }
 
         let apps = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        let app = apps.appendingPathComponent("VitalOS.app")
+        let app = apps.appendingPathComponent("Triage.app")
         let macos = app.appendingPathComponent("Contents/MacOS")
         do {
             try fm.createDirectory(at: macos, withIntermediateDirectories: true)
             try fm.createDirectory(at: app.appendingPathComponent("Contents/Resources"), withIntermediateDirectories: true)
-            let dest = macos.appendingPathComponent("VitalOS")
+            let dest = macos.appendingPathComponent("Triage")
             if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
             try fm.copyItem(at: exe, to: dest)
             let destPlist = app.appendingPathComponent("Contents/Info.plist")
@@ -36,18 +36,18 @@ enum AppBundler {
                 try fm.copyItem(at: fonts, to: destFonts)
             }
         } catch {
-            NSLog("VitalOS bundling failed: \(error)")
+            NSLog("Triage bundling failed: \(error)")
             return false
         }
         // A real certificate keeps permissions between builds; ad-hoc ("-") makes macOS forget them every time.
         let identity = pickSigningIdentity()
         UserDefaults.standard.set(identity, forKey: "signing.identity")
-        Shell.run("/usr/bin/codesign", ["--force", "--deep", "--sign", identity, "--identifier", "com.alenlvovich.vitalos", app.path], timeout: 30)
+        Shell.run("/usr/bin/codesign", ["--force", "--deep", "--sign", identity, "--identifier", "com.alenlvovich.triage", app.path], timeout: 30)
         if let img = NSImage(contentsOf: iconPNG) { NSWorkspace.shared.setIcon(img, forFile: app.path, options: []) }
 
         // Quit any older copy that's still running, then open the fresh one.
         let me = ProcessInfo.processInfo.processIdentifier
-        let old = NSRunningApplication.runningApplications(withBundleIdentifier: "com.alenlvovich.vitalos").filter { $0.processIdentifier != me }
+        let old = NSRunningApplication.runningApplications(withBundleIdentifier: "com.alenlvovich.triage").filter { $0.processIdentifier != me }
         old.forEach { $0.terminate() }
         // give them a moment to quit politely, then make sure: two copies would mean two menu bar icons
         for _ in 0..<20 where old.contains(where: { !$0.isTerminated }) { Thread.sleep(forTimeInterval: 0.1) }
@@ -61,7 +61,7 @@ enum AppBundler {
         var ok = false
         NSWorkspace.shared.openApplication(at: app, configuration: cfg) { running, err in
             ok = running != nil && err == nil
-            if let err { NSLog("VitalOS relaunch failed: \(err)") }
+            if let err { NSLog("Triage relaunch failed: \(err)") }
             done.signal()
         }
         _ = done.wait(timeout: .now() + 10)

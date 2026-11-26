@@ -125,7 +125,7 @@ struct PaneView: View {
                 VStack(spacing: 10) {
                     ProgressView()
                     Text("Opening \(pane.url.lastPathComponent)…").font(.ui(size: 13, weight: .medium))
-                    Text("If this takes a while, macOS is probably asking whether VitalOS may open this folder. Look for the prompt and click Allow.")
+                    Text("If this takes a while, macOS is probably asking whether Triage may open this folder. Look for the prompt and click Allow.")
                         .font(.ui(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,8 +133,8 @@ struct PaneView: View {
             if pane.accessDenied {
                 VStack(spacing: 10) {
                     Image(systemName: "lock.fill").font(.ui(size: 28)).foregroundStyle(.secondary)
-                    Text("VitalOS isn't allowed to open \(pane.url.lastPathComponent)").font(.ui(size: 14, weight: .semibold))
-                    Text("macOS asks once per folder. Turn VitalOS on under Files & Folders (or Full Disk Access), then try again.")
+                    Text("Triage isn't allowed to open \(pane.url.lastPathComponent)").font(.ui(size: 14, weight: .semibold))
+                    Text("macOS asks once per folder. Turn Triage on under Files & Folders (or Full Disk Access), then try again.")
                         .font(.ui(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
                     HStack {
                         Button("Open Privacy Settings") { NSWorkspace.shared.open(Perm.files.settingsURL) }
@@ -165,7 +165,7 @@ struct PaneView: View {
                         Image(systemName: pane.isFiltered ? "line.3.horizontal.decrease.circle" : "tray")
                             .font(.ui(size: 30)).foregroundStyle(.tertiary)
                         Text(pane.isFiltered ? "Nothing here matches your filters"
-                                             : "Empty folder, or macOS hasn't given VitalOS access yet")
+                                             : "Empty folder, or macOS hasn't given Triage access yet")
                             .font(.ui(size: 12)).foregroundStyle(.secondary)
                         if pane.isFiltered { Button("Clear filters") { pane.clearFilters() } }
                     }

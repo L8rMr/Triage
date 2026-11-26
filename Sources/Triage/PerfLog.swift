@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-/// Writes VitalOS's own CPU and memory use once a minute to TestFiles/perf.log (only when that folder exists).
+/// Writes Triage's own CPU and memory use once a minute to TestFiles/perf.log (only when that folder exists).
 final class PerfLog {
     static let shared = PerfLog()
     private let url: URL?
@@ -10,7 +10,7 @@ final class PerfLog {
     private var lastWrite = Date.distantPast
 
     private init() {
-        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Projects/VitalOS/TestFiles")
+        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Projects/Triage/TestFiles")
         var isDir: ObjCBool = false
         url = FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir) && isDir.boolValue ? dir.appendingPathComponent("perf.log") : nil
     }

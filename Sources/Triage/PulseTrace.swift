@@ -277,7 +277,7 @@ struct OnScreenReader: NSViewRepresentable {
 }
 
 enum AppVisibility {
-    /// True when any VitalOS window or the menu bar panel is showing.
+    /// True when any Triage window or the menu bar panel is showing.
     static var anythingShowing: Bool {
         guard let app = NSApp as NSApplication? else { return true }
         return app.windows.contains { $0.isVisible && $0.occlusionState.contains(.visible) && $0.frame.height > 60 }

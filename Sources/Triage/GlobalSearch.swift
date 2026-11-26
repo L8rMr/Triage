@@ -77,10 +77,10 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         // fade in rather than pop
         panel.alphaValue = 0
         NSAnimationContext.runAnimationGroup { c in c.duration = 0.14; c.timingFunction = CAMediaTimingFunction(name: .easeOut); panel.animator().alphaValue = 1 }
-        // Typing only reaches us if VitalOS is the active app: a panel can be key while keystrokes still go to
+        // Typing only reaches us if Triage is the active app: a panel can be key while keystrokes still go to
         // whatever app was in front. Activate, show the panel, then put the cursor in the field ourselves.
         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier { previous = front }
-        // If VitalOS is already the active app (its window is in front on this screen), a non-activating panel
+        // If Triage is already the active app (its window is in front on this screen), a non-activating panel
         // never takes the keyboard from it: the main window keeps key/main and swallows typing. Act like a
         // normal panel then; stay non-activating only when another app is in front, so that app keeps its place.
         if NSApp.isActive { panel.styleMask.remove(.nonactivatingPanel) } else { panel.styleMask.insert(.nonactivatingPanel) }
@@ -91,7 +91,7 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in self?.focusField() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, let p = self.panel, p.isVisible else { return }
-            // a floating panel normally takes the keyboard without activating VitalOS (so your main window stays put);
+            // a floating panel normally takes the keyboard without activating Triage (so your main window stays put);
             // if macOS didn't give it the keyboard, activate as a fallback
             if !p.isKeyWindow { NSApp.activate(ignoringOtherApps: true); p.makeKeyAndOrderFront(nil) }
             self.focusField()
@@ -108,7 +108,7 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         guard panel?.isVisible == true || monitor != nil else { return }
         panel?.orderOut(nil)
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
-        // back to where you were, unless you went on to a VitalOS window
+        // back to where you were, unless you went on to a Triage window
         let ourWindowKey = NSApp.windows.contains { $0.isKeyWindow && !($0 is SearchPanel) && $0.isVisible }
         if !ourWindowKey, let p = previous, !p.isTerminated { p.activate() }
         previous = nil
@@ -305,7 +305,7 @@ struct SearchResultsBody: View {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
             HStack(spacing: 16) {
                 hint("↑↓", "Move"); hint("↩", "Open"); hint("⌘↩", "Show in Finder")
-                if !inline { hint("⌥↩", "Open in VitalOS") }
+                if !inline { hint("⌥↩", "Open in Triage") }
                 hint("⌘Y", "Quick Look"); hint("⇧⌘C", "Copy path")
                 Spacer()
                 hint("⌥Space", "from any app")
@@ -380,7 +380,7 @@ struct SearchResultsBody: View {
                                     if hit.command != nil { Button("Do it") { engine.selected = hit.index; engine.activate() } } else {
                                     Button("Open") { engine.selected = hit.index; engine.activate() }
                                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([hit.url]) }
-                                    Button("Open in VitalOS") { engine.onOpenInVitalOS?(hit.url) }
+                                    Button("Open in Triage") { engine.onOpenInTriage?(hit.url) }
                                     Button("Copy Path") { engine.selected = hit.index; engine.copyPath() }
                                     }
                                 }
@@ -436,7 +436,7 @@ struct SearchResultsBody: View {
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Ask for files the way you'd say it").font(.ui(size: 15, weight: .semibold))
-                Text("VitalOS understands kinds, dates, sizes, places, where a file was downloaded from, and math.")
+                Text("Triage understands kinds, dates, sizes, places, where a file was downloaded from, and math.")
                     .font(.ui(size: 12)).foregroundStyle(.secondary)
                 ForEach(examples, id: \.self) { ex in
                     Button { engine.text = ex } label: {
@@ -481,7 +481,7 @@ struct HitRow: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(hit.name).font(.ui(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text(hit.command.map { $0.subtitle.isEmpty ? "VitalOS action · ↩ to do it" : $0.subtitle } ?? Places.abbreviate(hit.url.deletingLastPathComponent().path))
+                Text(hit.command.map { $0.subtitle.isEmpty ? "Triage action · ↩ to do it" : $0.subtitle } ?? Places.abbreviate(hit.url.deletingLastPathComponent().path))
                     .font(.ui(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             }
             Spacer(minLength: 4)
@@ -577,7 +577,7 @@ struct SearchKeys: ViewModifier {
             switch press.key {
             case .upArrow: engine.move(-1)
             case .downArrow: engine.move(1)
-            case .return: engine.activate(reveal: press.modifiers.contains(.command), inVitalOS: press.modifiers.contains(.option))
+            case .return: engine.activate(reveal: press.modifiers.contains(.command), inTriage: press.modifiers.contains(.option))
             default: if engine.text.isEmpty { engine.onClose?() } else { engine.text = "" }
             }
             return .handled

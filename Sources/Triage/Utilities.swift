@@ -302,7 +302,7 @@ enum Shell {
 
     static var supportDir: URL {
         let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VitalOS", isDirectory: true)
+            .appendingPathComponent("Triage", isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }

@@ -225,7 +225,7 @@ private struct GeneralPage: View {
     @AppStorage("tour.seen") private var tourSeen = false
 
     var body: some View {
-        PageHeader(title: "General", subtitle: "Make VitalOS yours.")
+        PageHeader(title: "General", subtitle: "Make Triage yours.")
         Group_(title: "Startup") {
             Row(title: "Open at login", hint: loginError ?? "Starts quietly in the menu bar") {
                 Toggle("", isOn: Binding(get: { login }, set: { on in
@@ -234,7 +234,7 @@ private struct GeneralPage: View {
                     login = SMAppService.mainApp.status == .enabled
                 })).labelsHidden().toggleStyle(.switch)
             }
-            Row(title: "Show the welcome tour again", hint: "Next time VitalOS opens") {
+            Row(title: "Show the welcome tour again", hint: "Next time Triage opens") {
                 Button("Show") { tourSeen = false }
             }
         }
@@ -272,7 +272,7 @@ private struct HeartPage: View {
     @ObservedObject var store = ThemeStore.shared
 
     var body: some View {
-        PageHeader(title: "Heart & Readings", subtitle: "How often VitalOS checks your Mac. Slower readings use less battery.")
+        PageHeader(title: "Heart & Readings", subtitle: "How often Triage checks your Mac. Slower readings use less battery.")
         Group_(title: "Readings") {
             Row(title: "While a window is open", hint: "Every \(rate.formatted()) seconds") {
                 ThemeSegments(selection: $rate, options: [(1.0, "1 s"), (1.5, "1.5 s"), (3.0, "3 s")]).frame(width: 220.d)
@@ -300,7 +300,7 @@ private struct FilesPage: View {
 private struct ShortcutsPage: View {
     private let keys: [(String, String, String)] = [
         ("Smart Search from any app", "Works anywhere on your Mac", "⌥ Space"),
-        ("Search inside VitalOS", "", "⌘ K"),
+        ("Search inside Triage", "", "⌘ K"),
         ("Home", "", "⌘ 1"), ("Heart", "", "⌘ 0"), ("Apps", "", "⌘ 2"), ("Files", "", "⌘ 4"),
         ("New folder", "", "⇧⌘ N"), ("Show hidden files", "", "⇧⌘ ."), ("Settings", "", "⌘ ,"),
     ]
@@ -322,8 +322,8 @@ private struct AdvancedPage: View {
     var body: some View {
         PageHeader(title: "Advanced", subtitle: "For tinkerers.")
         Group_(title: "Performance") {
-            Row(title: "VitalOS right now", hint: "Its own memory use, the same number Activity Monitor shows") { Text(usage).font(.ui(size: 12, design: .monospaced)) }
-            Row(title: "Usage log", hint: "Writes VitalOS's CPU and memory to TestFiles/perf.log once a minute") { Toggle("", isOn: $perfLog).labelsHidden().toggleStyle(.switch) }
+            Row(title: "Triage right now", hint: "Its own memory use, the same number Activity Monitor shows") { Text(usage).font(.ui(size: 12, design: .monospaced)) }
+            Row(title: "Usage log", hint: "Writes Triage's CPU and memory to TestFiles/perf.log once a minute") { Toggle("", isOn: $perfLog).labelsHidden().toggleStyle(.switch) }
         }
         Group_(title: "Reset") {
             Row(title: "Reset all settings", hint: "Theme, menu bar and panel choices. Files, servers and your signature stay.") {
@@ -331,7 +331,7 @@ private struct AdvancedPage: View {
             }
         }
         .onAppear { usage = String(format: "%.0f MB", PerfLog.footprintMB()) }
-        .confirmationDialog("Reset all VitalOS settings?", isPresented: $confirmReset) {
+        .confirmationDialog("Reset all Triage settings?", isPresented: $confirmReset) {
             Button("Reset", role: .destructive) {
                 for k in ["theme.id", "theme.accent", "theme.mode", "theme.density", "theme.text", "theme.motion", "theme.chrome", "theme.glow",
                           "bar.items", "bar.icon", "panel.tab", "heart.rate", "heart.bgrate", "files.hidden", "perf.log"] {

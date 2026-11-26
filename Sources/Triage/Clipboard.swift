@@ -469,7 +469,7 @@ final class ClipboardPanel: NSObject, NSWindowDelegate {
     func pick(_ c: Clip) {
         ClipboardStore.shared.copy(c)
         hide()
-        // Paste straight into the app you were using, if VitalOS is allowed to (Accessibility).
+        // Paste straight into the app you were using, if Triage is allowed to (Accessibility).
         if AXIsProcessTrusted() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 let src = CGEventSource(stateID: .combinedSessionState)
@@ -527,7 +527,7 @@ struct ClipPanelView: View {
                 .onChange(of: state.index) { _, i in proxy.scrollTo(i, anchor: .center) }
             }
             Rectangle().fill(Theme.stroke).frame(height: 0.5)
-            Text(AXIsProcessTrusted() ? "↩ pastes into your app · esc closes" : "↩ copies · allow VitalOS in Accessibility settings to paste directly")
+            Text(AXIsProcessTrusted() ? "↩ pastes into your app · esc closes" : "↩ copies · allow Triage in Accessibility settings to paste directly")
                 .font(.ui(size: 10)).foregroundStyle(.secondary).padding(8)
         }
         .frame(width: 460, height: 440)

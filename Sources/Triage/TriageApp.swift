@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         if AppBundler.relaunchAsBundleIfNeeded() { exit(0) }
+        RenameMigration.run()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Finder "Open With → VitalOS", or launched with --open-pdf <path>.
+    /// Finder "Open With → Triage", or launched with --open-pdf <path>.
     func application(_ app: NSApplication, open urls: [URL]) { urls.forEach(Self.openInEditor) }
 
     static func openInEditor(_ u: URL) {
@@ -42,12 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Closing the window keeps VitalOS alive in the menu bar.
+    // Closing the window keeps Triage alive in the menu bar.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
 @main
-struct VitalOSApp: App {
+struct TriageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var monitor = SystemMonitor.shared
     @StateObject private var model = AppModel()
@@ -58,7 +59,7 @@ struct VitalOSApp: App {
     }
 
     var body: some Scene {
-        Window("VitalOS", id: "main") {
+        Window("Triage", id: "main") {
             RootView()
                 .environmentObject(monitor)
                 .environmentObject(model)
@@ -89,7 +90,7 @@ struct VitalOSApp: App {
                     .keyboardShortcut("t", modifiers: [.command, .option, .shift])
             }
             CommandGroup(replacing: .help) {
-                Button("How to Use VitalOS") { model.showHelp = true }
+                Button("How to Use Triage") { model.showHelp = true }
                 Button("Permissions…") { model.showPermissions = true }
                     .keyboardShortcut("/", modifiers: [.command, .shift])
                 Button("Quick Tour") { model.startTour(.quick) }
@@ -221,11 +222,11 @@ struct RootView: View {
                 m.active.go(isFolder ? url : url.deletingLastPathComponent())
                 if !isFolder { m.active.selection = [url] }
                 NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first { $0.identifier?.rawValue == "main" || $0.title == "VitalOS" }?.makeKeyAndOrderFront(nil)
+                NSApp.windows.first { $0.identifier?.rawValue == "main" || $0.title == "Triage" }?.makeKeyAndOrderFront(nil)
             }
-            GlobalSearch.shared.engine.onOpenInVitalOS = openHere
-            model.search.onOpenInVitalOS = openHere
-            HomeView.engine.onOpenInVitalOS = openHere
+            GlobalSearch.shared.engine.onOpenInTriage = openHere
+            model.search.onOpenInTriage = openHere
+            HomeView.engine.onOpenInTriage = openHere
         }
     }
 
@@ -263,7 +264,7 @@ struct Sidebar: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
                     Image(systemName: "heart.text.square.fill").foregroundStyle(Theme.heart)
-                    Text("VitalOS").font(.ui(size: 15, weight: .bold, design: .rounded))
+                    Text("Triage").font(.ui(size: 15, weight: .bold, design: .rounded))
                     Spacer()
                     Text("\(Int(monitor.bpm.rounded())) bpm")
                         .font(.ui(size: 10, weight: .medium, design: .monospaced))
@@ -546,4 +547,33 @@ struct TrashReview: View {
     }
 }
 
-extension Notification.Name { static let vitalOSShowPDF = Notification.Name("VitalOSShowPDF") }
+extension Notification.Name { static let vitalOSShowPDF = Notification.Name("TriageShowPDF") }
+
+
+/// VitalOS → Triage, once: carry settings over from the old bundle ID and move the support folder
+/// (health history, screen time, Autopilot rules, clipboard history), so nothing is lost with the new name.
+enum RenameMigration {
+    static let oldID = "com.alenlvovich.vitalos" as CFString
+    static func run() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "migrated.fromVitalOS") else { return }
+        // settings: every key the old app stored that the new one doesn't have yet
+        let user = kCFPreferencesCurrentUser, host = kCFPreferencesAnyHost
+        if let keys = CFPreferencesCopyKeyList(oldID, user, host) as? [String],
+           let old = CFPreferencesCopyMultiple(keys as CFArray, oldID, user, host) as? [String: Any] {
+            for (k, v) in old where d.object(forKey: k) == nil { d.set(v, forKey: k) }
+        }
+        // support folder
+        let fm = FileManager.default
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let oldDir = base.appendingPathComponent("VitalOS", isDirectory: true)
+        let newDir = base.appendingPathComponent("Triage", isDirectory: true)
+        if fm.fileExists(atPath: oldDir.path) {
+            if !fm.fileExists(atPath: newDir.path) || ((try? fm.contentsOfDirectory(atPath: newDir.path))?.isEmpty ?? true) {
+                try? fm.removeItem(at: newDir)
+                try? fm.moveItem(at: oldDir, to: newDir)
+            }
+        }
+        d.set(true, forKey: "migrated.fromVitalOS")
+    }
+}

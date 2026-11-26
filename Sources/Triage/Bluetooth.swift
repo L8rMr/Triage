@@ -165,7 +165,7 @@ enum QuickFix {
     static func idleApps(_ apps: [AppUsage]) -> [(NSRunningApplication, UInt64)] {
         let onScreen = Set(((CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? [])
             .compactMap { ($0[kCGWindowLayer as String] as? Int) == 0 ? $0[kCGWindowOwnerPID as String] as? pid_t : nil })
-        let skip: Set<String> = ["com.apple.finder", "com.alenlvovich.vitalos", "com.apple.dt.Xcode", "com.apple.Terminal"]
+        let skip: Set<String> = ["com.apple.finder", "com.alenlvovich.triage", "com.apple.dt.Xcode", "com.apple.Terminal"]
         return NSWorkspace.shared.runningApplications.compactMap { r in
             guard r.activationPolicy == .regular, !r.isActive, !onScreen.contains(r.processIdentifier),
                   let id = r.bundleIdentifier, !skip.contains(id), let path = r.bundleURL?.path,
@@ -179,7 +179,7 @@ enum QuickFix {
         let c = UNUserNotificationCenter.current()
         c.requestAuthorization(options: [.alert, .sound]) { ok, _ in
             DispatchQueue.main.async {
-                guard ok else { UndoCenter.shared.show("Turn on notifications for VitalOS to get the reminder"); return }
+                guard ok else { UndoCenter.shared.show("Turn on notifications for Triage to get the reminder"); return }
                 let content = UNMutableNotificationContent()
                 content.title = "Time to restart your Mac"
                 content.body = "A restart clears the swap file and gives your Mac a fresh start."

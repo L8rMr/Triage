@@ -3,7 +3,7 @@
    <BuildAction parallelizeBuildables = "YES" buildImplicitDependencies = "YES">
       <BuildActionEntries>
          <BuildActionEntry buildForTesting = "YES" buildForRunning = "YES" buildForProfiling = "YES" buildForArchiving = "YES" buildForAnalyzing = "YES">
-            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "VitalOS" BuildableName = "VitalOS" BlueprintName = "VitalOS" ReferencedContainer = "container:">
+            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "Triage" BuildableName = "Triage" BlueprintName = "Triage" ReferencedContainer = "container:">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -12,7 +12,7 @@
    </TestAction>
    <LaunchAction buildConfiguration = "Release" selectedDebuggerIdentifier = "" selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn" launchStyle = "0" useCustomWorkingDirectory = "NO" ignoresPersistentStateOnLaunch = "NO" debugDocumentVersioning = "YES" debugServiceExtension = "internal" allowLocationSimulation = "YES">
       <BuildableProductRunnable runnableDebuggingMode = "0">
-         <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "VitalOS" BuildableName = "VitalOS" BlueprintName = "VitalOS" ReferencedContainer = "container:">
+         <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "Triage" BuildableName = "Triage" BlueprintName = "Triage" ReferencedContainer = "container:">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>

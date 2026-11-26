@@ -44,7 +44,7 @@ extension AppTheme {
     private static func sys(_ c: NSColor) -> Color { Color(nsColor: c) }
 
     static let all: [AppTheme] = [
-        AppTheme(id: "vitalos", name: "VitalOS", era: "Clinical dark",
+        AppTheme(id: "vitalos", name: "Triage", era: "Clinical dark",
                  about: "The default. Calm and dark like a bedside monitor: green when healthy, coral under strain, amber for heat.",
                  chrome: .vitalos, scheme: .dark,
                  bg: Color(hex6: 0x0B0D10), sidebar: Color(hex6: 0x0D1013), card: Color(hex6: 0x12161A), stroke: Color(hex6: 0x1E242C),
@@ -312,7 +312,7 @@ struct WindowChrome: View {
         switch theme.chrome {
         case .win95:
             HStack(spacing: 2) {
-                Text("VitalOS").font(.custom("Tahoma-Bold", size: 12)).foregroundStyle(.white).padding(.leading, 6)
+                Text("Triage").font(.custom("Tahoma-Bold", size: 12)).foregroundStyle(.white).padding(.leading, 6)
                 Spacer().allowsHitTesting(false)
                 ForEach(["_", "□", "×"], id: \.self) { g in
                     Button(action: g == "×" ? close : g == "_" ? mini : zoom) {
@@ -325,7 +325,7 @@ struct WindowChrome: View {
             .background(LinearGradient(colors: [Color(hex6: 0x000080), Color(hex6: 0x1084D0)], startPoint: .leading, endPoint: .trailing).allowsHitTesting(false))
         case .xp:
             HStack(spacing: 2) {
-                Text("VitalOS").font(.custom("Tahoma-Bold", size: 13)).foregroundStyle(.white).shadow(color: .black.opacity(0.4), radius: 0, x: 1, y: 1).padding(.leading, 8)
+                Text("Triage").font(.custom("Tahoma-Bold", size: 13)).foregroundStyle(.white).shadow(color: .black.opacity(0.4), radius: 0, x: 1, y: 1).padding(.leading, 8)
                 Spacer().allowsHitTesting(false)
                 ForEach(["_", "□", "×"], id: \.self) { g in
                     Button(action: g == "×" ? close : g == "_" ? mini : zoom) {
@@ -340,7 +340,7 @@ struct WindowChrome: View {
             .background(LinearGradient(colors: [Color(hex6: 0x0A5FE8), Color(hex6: 0x3A93FF), Color(hex6: 0x0058E6), Color(hex6: 0x0047C9)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false))
         case .win11:
             HStack(spacing: 0) {
-                Text("VitalOS").font(.system(size: 12)).foregroundStyle(Color(hex6: 0x1A1A1A)).padding(.leading, 12)
+                Text("Triage").font(.system(size: 12)).foregroundStyle(Color(hex6: 0x1A1A1A)).padding(.leading, 12)
                 Spacer().allowsHitTesting(false)
                 ForEach(["minus", "square", "xmark"], id: \.self) { g in
                     Win11Button(symbol: g, isClose: g == "xmark", action: g == "xmark" ? close : g == "minus" ? mini : zoom)
@@ -350,7 +350,7 @@ struct WindowChrome: View {
             HStack(spacing: 6) {
                 Button(action: close) { Rectangle().stroke(.black, lineWidth: 1).background(.white).frame(width: 11, height: 11) }.buttonStyle(.plain).padding(.leading, 8)
                 Stripes()
-                Text("VitalOS").font(.custom("Geneva", size: 12).weight(.bold)).foregroundStyle(.black).padding(.horizontal, 6).background(.white)
+                Text("Triage").font(.custom("Geneva", size: 12).weight(.bold)).foregroundStyle(.black).padding(.horizontal, 6).background(.white)
                 Stripes()
                 Button(action: zoom) { Rectangle().stroke(.black, lineWidth: 1).background(.white).frame(width: 11, height: 11) }.buttonStyle(.plain).padding(.trailing, 8)
             }
@@ -359,7 +359,7 @@ struct WindowChrome: View {
         case .gnome:
             HStack(spacing: 6) {
                 Spacer().allowsHitTesting(false)
-                Text("VitalOS").font(.custom("Ubuntu-Bold", size: 13)).foregroundStyle(Color(hex6: 0x2E3436))
+                Text("Triage").font(.custom("Ubuntu-Bold", size: 13)).foregroundStyle(Color(hex6: 0x2E3436))
                 Spacer().allowsHitTesting(false)
                 ForEach(["minus", "xmark"], id: \.self) { g in
                     Button(action: g == "xmark" ? close : mini) {

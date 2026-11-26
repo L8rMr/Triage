@@ -7,7 +7,7 @@ import AudioToolbox
 import UserNotifications
 import ApplicationServices
 
-/// Every macOS permission VitalOS uses, what it unlocks, and how to grant it.
+/// Every macOS permission Triage uses, what it unlocks, and how to grant it.
 enum Perm: String, CaseIterable, Identifiable {
     case files, location, bluetooth, audio, screen, accessibility, notifications, fullDisk
     var id: String { rawValue }
@@ -234,8 +234,8 @@ struct PermissionsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "checkmark.shield.fill").font(.ui(size: 28)).foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(firstRun ? "Let's get VitalOS set up" : "Permissions").font(.ui(size: 20, weight: .bold, design: .rounded))
-                    Text(firstRun ? "Here's what VitalOS can do so far. Allow All asks for each missing one, one prompt at a time. Everything stays on your Mac."
+                    Text(firstRun ? "Let's get Triage set up" : "Permissions").font(.ui(size: 20, weight: .bold, design: .rounded))
+                    Text(firstRun ? "Here's what Triage can do so far. Allow All asks for each missing one, one prompt at a time. Everything stays on your Mac."
                                   : "macOS asks once for each of these. Everything stays on your Mac.")
                         .font(.ui(size: 12)).foregroundStyle(.secondary)
                 }
@@ -262,7 +262,7 @@ struct PermissionsView: View {
                 .disabled(running || perms.allGood)
                 .keyboardShortcut(.defaultAction)
             }
-            Text("Full Disk Access is the only one macOS won't prompt for. Click Open, then switch on VitalOS (use + to add it if it's not listed).")
+            Text("Full Disk Access is the only one macOS won't prompt for. Click Open, then switch on Triage (use + to add it if it's not listed).")
                 .font(.ui(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(22)

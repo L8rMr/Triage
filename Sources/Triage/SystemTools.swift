@@ -43,7 +43,7 @@ final class StartupModel: ObservableObject {
     @Published var loadedLogin = false
 
     static let userAgents = Places.home.appendingPathComponent("Library/LaunchAgents")
-    static let disabledDir = Places.home.appendingPathComponent("Library/LaunchAgents (Disabled by VitalOS)")
+    static let disabledDir = Places.home.appendingPathComponent("Library/LaunchAgents (Disabled by Triage)")
 
     func load() {
         Work.quick.async {
@@ -659,7 +659,7 @@ struct HealthHistoryView: View {
                     }
                     VStack(alignment: .leading) {
                         if shown.count < 2 {
-                            empty("Recording started. VitalOS logs your Mac's heart rate every minute while it's open, and keeps 14 days.")
+                            empty("Recording started. Triage logs your Mac's heart rate every minute while it's open, and keeps 14 days.")
                         } else {
                             Chart {
                                 ForEach(shown) { s in
@@ -706,7 +706,7 @@ struct HealthHistoryView: View {
                             Toggle("Tell me when my Mac is strained", isOn: $alertOn)
                             Stepper("Heart rate at or above \(Int(alertBPM)) bpm", value: $alertBPM, in: 100...175, step: 5)
                             Stepper("For \(Int(alertMinutes)) minutes", value: $alertMinutes, in: 1...30)
-                            Button("Send a test alert") { HealthLog.shared.notify(title: "Test alert", body: "This is how VitalOS will let you know.") }
+                            Button("Send a test alert") { HealthLog.shared.notify(title: "Test alert", body: "This is how Triage will let you know.") }
                                 .controlSize(.small)
                         }
                         .font(.ui(size: 12))

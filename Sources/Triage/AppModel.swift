@@ -46,7 +46,7 @@ final class AppModel: ObservableObject {
         p.canChooseFiles = false
         p.allowsMultipleSelection = true
         p.prompt = "Add to Sidebar"
-        p.message = "Choose folders to keep in the VitalOS sidebar. Cloud folders work too."
+        p.message = "Choose folders to keep in the Triage sidebar. Cloud folders work too."
         if p.runModal() == .OK { p.urls.forEach(pin) }
     }
     @Published var tourActive = false
