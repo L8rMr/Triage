@@ -22,7 +22,7 @@ cd "$ROOT/iOS" || exit 1
 BUILD=$(date +%Y%m%d%H%M)      # always higher than the last one, here or on GitHub
 ARCHIVE="$ROOT/.export/Triage-iOS.xcarchive"
 rm -rf "$ARCHIVE" "$ROOT/.export/ios-export"
-echo "== Archiving build $BUILD…"
+echo "== Archiving build ${BUILD}..."
 xcodebuild archive -project TriageRemote.xcodeproj -scheme Triage \
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates CURRENT_PROJECT_VERSION="$BUILD" -quiet || { echo "== ARCHIVE FAILED"; exit 1; }
@@ -31,4 +31,4 @@ echo "== Uploading to App Store Connect…"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist ExportOptions.plist \
   -exportPath "$ROOT/.export/ios-export" -allowProvisioningUpdates || { echo "== UPLOAD FAILED"; exit 1; }
 
-echo "== DONE: build $BUILD uploaded. It shows up in TestFlight after Apple finishes processing (~10-15 min)."
+echo "== DONE: build ${BUILD} uploaded. It shows up in TestFlight after Apple finishes processing (~10-15 min)."
