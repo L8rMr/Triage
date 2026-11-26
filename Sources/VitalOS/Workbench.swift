@@ -377,6 +377,8 @@ struct WorkbenchHome: View {
                     }
                 }
 
+                GlanceDashboard()
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("JUMP TO").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: jumpMinW), spacing: 12)], spacing: 12) {
@@ -414,24 +416,18 @@ struct WorkbenchHome: View {
     @State private var pageSize: CGSize = .zero
     private var jumpTools: [ToolID] { pinnedTools.split(separator: ",").compactMap { ToolID(rawValue: String($0)) } }
     private var jumpCount: Int { jumpTools.count + Places.favorites.count + model.pinned.count }
-    private var jumpMinW: CGFloat { pageSize.width > 1300 ? 190 : 160 }
-    private var jumpTileH: CGFloat {
-        let w = max(pageSize.width - 56.d, 200), gap: CGFloat = 12
-        let cols = max(1, Int((w + gap) / (jumpMinW + gap)))
-        let rows = max(1, Int(ceil(Double(jumpCount) / Double(cols))))
-        let room = pageSize.height * 0.85 - jumpTop - 28   // below the JUMP TO label
-        return min(260, max(64, (room - gap * CGFloat(rows - 1)) / CGFloat(rows)))
-    }
+    private var jumpMinW: CGFloat { 120 }
+    private var jumpTileH: CGFloat { 58.d }   // small and tidy: the dashboard above is the show
 
     private func jumpTile(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
         let h = jumpTileH
         return Button(action: action) {
-            VStack(spacing: h > 100 ? 10 : 6) {
-                Image(systemName: symbol).font(.system(size: max(18, h * 0.3), weight: .medium)).foregroundStyle(Theme.accent)
-                Text(title).font(.ui(size: h > 100 ? 14 : 12, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.accent)
+                Text(title).font(.ui(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity).frame(height: h)
-            .glass(14).contentShape(Rectangle())
+            .glass(12).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

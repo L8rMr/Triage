@@ -27,6 +27,7 @@ final class SystemMonitor: ObservableObject {
     private init() {
         tick()
         schedule(1.5)
+        DispatchQueue.main.async { AppTime.shared.start() }   // screen time per app, for Home's dashboard
     }
 
     /// 1.5 s while a window or the menu panel is showing, 5 s in the background.
