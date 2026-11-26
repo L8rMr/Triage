@@ -46,6 +46,8 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
     let engine = SmartSearch()
     private var panel: SearchPanel?
     private var monitor: Any?
+    /// The app you were in, so closing the panel hands the keyboard straight back to it.
+    private var previous: NSRunningApplication?
 
     func toggle() {
         if panel?.isVisible == true { hide() } else { show() }
@@ -61,9 +63,20 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
                                          y: f.maxY - f.height * 0.18 - panel.frame.height))
         }
         engine.refresh()
+        // Typing only reaches us if VitalOS is the active app: a panel can be key while keystrokes still go to
+        // whatever app was in front. Activate, show the panel, then put the cursor in the field ourselves.
+        if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier { previous = front }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
         engine.focusToken += 1
+        DispatchQueue.main.async { [weak self] in self?.focusField() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, let p = self.panel, p.isVisible else { return }
+            // a floating panel normally takes the keyboard without activating VitalOS (so your main window stays put);
+            // if macOS didn't give it the keyboard, activate as a fallback
+            if !p.isKeyWindow { NSApp.activate(ignoringOtherApps: true); p.makeKeyAndOrderFront(nil) }
+            self.focusField()
+        }
         if monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
                 guard let self, let p = self.panel, p.isKeyWindow else { return e }
@@ -73,8 +86,28 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        guard panel?.isVisible == true || monitor != nil else { return }
         panel?.orderOut(nil)
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        // back to where you were, unless you went on to a VitalOS window
+        let ourWindowKey = NSApp.windows.contains { $0.isKeyWindow && !($0 is SearchPanel) && $0.isVisible }
+        if !ourWindowKey, let p = previous, !p.isTerminated { p.activate() }
+        previous = nil
+    }
+
+    private func focusField() {
+        guard let panel, panel.isVisible else { return }
+        if !panel.isKeyWindow { panel.makeKey() }
+        if let r = panel.firstResponder as? NSText, r.isEditable { return }   // already typing in it
+        if let field = Self.firstEditable(in: panel.contentView) { panel.makeFirstResponder(field) }
+    }
+
+    private static func firstEditable(in v: NSView?) -> NSView? {
+        guard let v else { return nil }
+        if let f = v as? NSTextField, f.isEditable { return f }
+        if let t = v as? NSTextView, t.isEditable { return t }
+        for s in v.subviews { if let f = firstEditable(in: s) { return f } }
+        return nil
     }
 
     func windowDidResignKey(_ notification: Notification) { hide() }
