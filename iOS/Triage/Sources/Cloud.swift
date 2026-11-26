@@ -71,7 +71,7 @@ final class CloudDirectory: ObservableObject {
         rec["phonePort"] = me.port
         rec["state"] = "ask"
         rec["at"] = Date()
-        _ = try await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
+        try await CloudSave.one(rec, in: db)
         // the Mac checks every few seconds
         for _ in 0..<24 {
             try await Task.sleep(for: .milliseconds(500))
@@ -206,5 +206,14 @@ final class PathWatch {
             if was != wifi { DispatchQueue.main.async { self.changed?() } }
         }
         monitor.start(queue: DispatchQueue(label: "triage.path"))
+    }
+}
+
+
+/// CloudKit reports a failed record inside the result, not by throwing: surface it.
+enum CloudSave {
+    static func one(_ rec: CKRecord, in db: CKDatabase) async throws {
+        let r = try await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
+        if case .failure(let e)? = r.saveResults[rec.recordID] { throw e }
     }
 }

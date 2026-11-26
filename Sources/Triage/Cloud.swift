@@ -111,7 +111,7 @@ final class CloudPresence: ObservableObject {
         rec["mode"] = RemoteServer.shared.mode.rawValue
         rec["seen"] = Date()
         do {
-            _ = try await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
+            try await CloudSave.one(rec, in: db)
             setStatus(a == nil ? "In iCloud · direct internet connection unavailable on this network"
                                : "In iCloud · reachable from anywhere")
         } catch {
@@ -135,7 +135,7 @@ final class CloudPresence: ObservableObject {
         rec["state"] = "ready"
         rec["macHost"] = me?.host ?? (rec["macHost"] as? String)
         rec["macPort"] = me?.port ?? (rec["macPort"] as? Int)
-        _ = try? await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
+        try? await CloudSave.one(rec, in: db)
         RemoteServer.shared.record("iPhone", "Opened a direct internet connection")
     }
 
@@ -361,5 +361,14 @@ enum QuicIdentity {
         p.standardError = FileHandle.nullDevice
         try? p.run()
         p.waitUntilExit()
+    }
+}
+
+
+/// CloudKit reports a failed record inside the result, not by throwing: surface it.
+enum CloudSave {
+    static func one(_ rec: CKRecord, in db: CKDatabase) async throws {
+        let r = try await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
+        if case .failure(let e)? = r.saveResults[rec.recordID] { throw e }
     }
 }
