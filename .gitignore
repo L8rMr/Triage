@@ -9,3 +9,4 @@ build/
 *.bak
 TestFiles/*.log
 TestFiles/perf.log
+dist/
