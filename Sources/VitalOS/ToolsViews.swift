@@ -18,6 +18,15 @@ struct CleanTarget: Identifiable {
     let source: Source
     var size: Int64?
     var count = 0
+    /// What the size is made of, biggest first: the files and folders a clear would move to the Trash.
+    var parts: [CleanPart] = []
+}
+
+struct CleanPart: Identifiable, Hashable {
+    let url: URL
+    let size: Int64
+    var id: URL { url }
+    var name: String { url.lastPathComponent }
 }
 
 enum Cleaner {
@@ -69,7 +78,8 @@ enum Cleaner {
         var t = t
         let items = resolve(t.source)
         t.count = items.count
-        t.size = items.reduce(0) { $0 + FS.size(of: $1) }
+        t.parts = items.map { CleanPart(url: $0, size: FS.size(of: $0)) }.sorted { $0.size > $1.size }
+        t.size = t.parts.reduce(0) { $0 + $1.size }
         return t
     }
 }
@@ -83,17 +93,42 @@ struct CleanView: View {
     /// nil until you touch a checkbox: then "everything safe" is the default pick.
     @State private var checked: Set<String>?
     @State private var confirmPicked = false
+    /// Opened suggestions, and per-suggestion picks when you've chosen only some of its items.
+    @State private var expanded: Set<String> = []
+    @State private var partPicks: [String: Set<URL>] = [:]
 
     private var pickedIDs: Set<String> { checked ?? Set(targets.filter(\.safe).map(\.id)) }
     private var picked: [CleanTarget] { targets.filter { pickedIDs.contains($0.id) && $0.id != "trash" && ($0.size ?? 0) > 0 } }
-    private var pickedBytes: Int64 { picked.compactMap(\.size).reduce(0, +) }
+    private func bytes(_ t: CleanTarget) -> Int64 {
+        if let p = partPicks[t.id] { return t.parts.filter { p.contains($0.url) }.reduce(0) { $0 + $1.size } }
+        return t.size ?? 0
+    }
+    private var pickedBytes: Int64 { picked.reduce(0) { $0 + bytes($1) } }
     private func toggle(_ t: CleanTarget) {
         var s = pickedIDs
-        if s.contains(t.id) { s.remove(t.id) } else { s.insert(t.id) }
+        if s.contains(t.id) && partPicks[t.id] == nil { s.remove(t.id) } else { s.insert(t.id) }
+        partPicks[t.id] = nil
+        checked = s
+    }
+    private func isPartPicked(_ t: CleanTarget, _ p: CleanPart) -> Bool {
+        guard pickedIDs.contains(t.id) else { return false }
+        return partPicks[t.id]?.contains(p.url) ?? true
+    }
+    private func togglePart(_ t: CleanTarget, _ p: CleanPart) {
+        let all = Set(t.parts.map(\.url))
+        var set = partPicks[t.id] ?? (pickedIDs.contains(t.id) ? all : [])
+        if set.contains(p.url) { set.remove(p.url) } else { set.insert(p.url) }
+        setParts(t, set)
+    }
+    private func setParts(_ t: CleanTarget, _ set: Set<URL>) {
+        var s = pickedIDs
+        if set.isEmpty { s.remove(t.id); partPicks[t.id] = nil }
+        else if set.count == t.parts.count { s.insert(t.id); partPicks[t.id] = nil }
+        else { s.insert(t.id); partPicks[t.id] = set }
         checked = s
     }
     private func clearPicked() {
-        if picked.contains(where: { !$0.safe }) { confirmPicked = true } else { clearMany(picked); checked = nil }
+        if picked.contains(where: { !$0.safe }) { confirmPicked = true } else { clearMany(picked); checked = nil; partPicks = [:] }
     }
     @State private var fName = ""
     @State private var fSizes: Set<String> = []
@@ -166,7 +201,7 @@ struct CleanView: View {
         }
         .task { await refresh() }
         .confirmationDialog("Clear \(Fmt.bytes(pickedBytes))?", isPresented: $confirmPicked) {
-            Button("Move to Trash", role: .destructive) { clearMany(picked); checked = nil }
+            Button("Move to Trash", role: .destructive) { clearMany(picked); checked = nil; partPicks = [:] }
         } message: {
             Text("Includes items marked Your call: " + picked.filter { !$0.safe }.map(\.title).joined(separator: ", ") + ". You can Undo right after.")
         }
@@ -190,15 +225,22 @@ struct CleanView: View {
                         Image(systemName: t.symbol).font(.ui(size: 16)).foregroundStyle(Theme.net).frame(width: 26)
                     } else {
                         Button { toggle(t) } label: {
-                            Image(systemName: pickedIDs.contains(t.id) ? "checkmark.square.fill" : "square")
+                            Image(systemName: !pickedIDs.contains(t.id) ? "square" : partPicks[t.id] != nil ? "minus.square.fill" : "checkmark.square.fill")
                                 .font(.system(size: 18)).foregroundStyle(pickedIDs.contains(t.id) ? Theme.accent : Color.secondary)
                                 .frame(width: 26)
                         }
                         .buttonStyle(.plain).help(pickedIDs.contains(t.id) ? "Untick to keep" : "Tick to clear")
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(t.title).font(.ui(size: 13, weight: .semibold))
-                        Text(t.detail).font(.ui(size: 11)).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(t.title).font(.ui(size: 13, weight: .semibold))
+                            if !t.parts.isEmpty {
+                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                                    .rotationEffect(.degrees(expanded.contains(t.id) ? 90 : 0))
+                            }
+                        }
+                        Text(partPicks[t.id].map { "\($0.count) of \(t.parts.count) picked · \(Fmt.bytes(bytes(t)))" } ?? t.detail)
+                            .font(.ui(size: 11)).foregroundStyle(partPicks[t.id] != nil ? Theme.accent : Color.secondary)
                     }
                     Spacer()
                     Text(t.safe ? "Comes back on its own" : "Your call")
@@ -223,8 +265,13 @@ struct CleanView: View {
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
-                .glass(12)
                 .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !t.parts.isEmpty else { return }
+                    withAnimation(.snappy(duration: 0.22)) { if expanded.contains(t.id) { expanded.remove(t.id) } else { expanded.insert(t.id) } }
+                }
+                .modifier(Accordion(open: expanded.contains(t.id) && !t.parts.isEmpty) { breakdown(t) })
+                .glass(12)
                 .contextMenu {
                     Button(t.id == "trash" ? "Empty Trash…" : "Clear") { if t.safe { clear(t) } else { confirm = t } }
                         .disabled(t.id != "trash" && (t.size ?? 0) == 0)
@@ -238,6 +285,53 @@ struct CleanView: View {
                 }
             }
         }
+    }
+
+    /// What's inside a suggestion: every file or folder, its size, and a tick box.
+    private func breakdown(_ t: CleanTarget) -> some View {
+        let shown = Array(t.parts.prefix(300))
+        let selectable = t.id != "trash"
+        return VStack(alignment: .leading, spacing: 0) {
+            Divider().opacity(0.5)
+            HStack(spacing: 10) {
+                Text("\(t.parts.count) item\(t.parts.count == 1 ? "" : "s") make up \(Fmt.bytes(t.size ?? 0))")
+                    .font(.ui(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if selectable {
+                    Button("Select all") { setParts(t, Set(t.parts.map(\.url))) }.buttonStyle(.borderless).font(.ui(size: 11))
+                    Button("None") { setParts(t, []) }.buttonStyle(.borderless).font(.ui(size: 11))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            ForEach(shown) { p in
+                HStack(spacing: 10) {
+                    if selectable {
+                        Button { togglePart(t, p) } label: {
+                            Image(systemName: isPartPicked(t, p) ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 14)).foregroundStyle(isPartPicked(t, p) ? Theme.accent : Color.secondary)
+                        }.buttonStyle(.plain)
+                    }
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: p.url.path)).resizable().frame(width: 16, height: 16)
+                    Text(p.name).font(.ui(size: 12)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Text(Fmt.bytes(p.size)).font(.ui(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([p.url]) } label: { Image(systemName: "arrow.up.forward.square") }
+                        .buttonStyle(.borderless).help("Show in Finder")
+                }
+                .padding(.horizontal, 14).padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .onTapGesture { if selectable { togglePart(t, p) } }
+                .contextMenu {
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([p.url]) }
+                    Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p.url.path, forType: .string) }
+                }
+            }
+            if t.parts.count > shown.count {
+                Text("…and \(t.parts.count - shown.count) smaller items (\(Fmt.bytes(t.parts.dropFirst(shown.count).reduce(0) { $0 + $1.size })))")
+                    .font(.ui(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 6)
+            }
+        }
+        .padding(.bottom, 8)
     }
 
     private func refresh() async {
@@ -265,9 +359,9 @@ struct CleanView: View {
     private func clearAllSafe() { clearMany(targets.filter(\.safe)) }
 
     private func clearMany(_ list: [CleanTarget]) {
-        let urls = list.flatMap { Cleaner.resolve($0.source) }
+        let urls = list.flatMap { t in partPicks[t.id].map { Array($0) } ?? Cleaner.resolve(t.source) }
         guard !urls.isEmpty else { return }
-        let freed = list.compactMap(\.size).reduce(0, +)
+        let freed = list.reduce(0) { $0 + bytes($1) }
         working = "Clearing…"
         DispatchQueue.global(qos: .userInitiated).async {
             let moved = FileOps.trash(urls)
@@ -599,5 +693,19 @@ struct TidyView: View {
                 }
             }
         }
+    }
+}
+
+
+/// Hangs a panel under a row that opens and closes in place.
+struct Accordion<Panel: View>: ViewModifier {
+    let open: Bool
+    @ViewBuilder let panel: () -> Panel
+    func body(content: Content) -> some View {
+        VStack(spacing: 0) {
+            content
+            if open { panel().transition(.opacity.combined(with: .move(edge: .top))) }
+        }
+        .clipped()
     }
 }

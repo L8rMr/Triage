@@ -47,6 +47,10 @@ sleep 1
 rm -rf "/Applications/$NAME.app"
 ditto "$APP" "/Applications/$NAME.app"
 rm -rf "$HOME/Applications/$NAME.app"   # the old dev copy made by Xcode runs
+# make Finder and the Dock forget the old icon
+touch "/Applications/$NAME.app"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/$NAME.app" >/dev/null 2>&1 || true
+killall Dock >/dev/null 2>&1 || true
 
 echo "▸ Making the DMG…"
 mkdir -p dist
