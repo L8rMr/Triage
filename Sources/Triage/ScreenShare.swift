@@ -1,4 +1,5 @@
 import Foundation
+import Carbon
 import AppKit
 import ScreenCaptureKit
 import CoreImage
@@ -349,6 +350,16 @@ enum RemoteInput {
         case "text":
             for ch in (e["s"] as? String) ?? "" {
                 if ch == "\n" { one(["k": "key", "key": "return"]); continue }
+                // Real key presses first: the lock screen's password field (and any secure field) ignores
+                // Unicode text and only sees the key, which would turn every letter into "a".
+                if let (code, f) = KeyLayout.stroke(for: ch) {
+                    for down in [true, false] {
+                        guard let ev = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { continue }
+                        ev.flags = f
+                        ev.post(tap: .cghidEventTap)
+                    }
+                    continue
+                }
                 let u = Array(String(ch).utf16)
                 for down in [true, false] {
                     guard let ev = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down) else { continue }
@@ -490,5 +501,49 @@ extension RemoteAPI {
         default: return false
         }
         return true
+    }
+}
+
+
+/// Character → the key (and Shift/Option) that types it on the Mac's current keyboard layout.
+enum KeyLayout {
+    private static var map: [Character: (CGKeyCode, CGEventFlags)] = [:]
+    private static var layoutID = ""
+
+    static func stroke(for ch: Character) -> (CGKeyCode, CGEventFlags)? {
+        // the keyboard-layout APIs must run on the main thread on current macOS
+        if Thread.isMainThread { refresh(); return map[ch] }
+        return DispatchQueue.main.sync { refresh(); return map[ch] }
+    }
+
+    private static func refresh() {
+        guard let src = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else { return }
+        let id = (TISGetInputSourceProperty(src, kTISPropertyInputSourceID)).map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String } ?? ""
+        if id == layoutID && !map.isEmpty { return }
+        guard let raw = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return }
+        let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+        var m: [Character: (CGKeyCode, CGEventFlags)] = [:]
+        // plain first so it wins, then Shift, Option, Shift+Option
+        let mods: [(UInt32, CGEventFlags)] = [(0, []), (UInt32(shiftKey >> 8), .maskShift),
+                                              (UInt32(optionKey >> 8), .maskAlternate),
+                                              (UInt32((shiftKey | optionKey) >> 8), [.maskShift, .maskAlternate])]
+        data.withUnsafeBytes { buf in
+            guard let layout = buf.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return }
+            for (mod, flags) in mods {
+                for code in 0..<128 {
+                    var dead: UInt32 = 0
+                    var len = 0
+                    var chars = [UniChar](repeating: 0, count: 4)
+                    let st = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), mod, UInt32(LMGetKbdType()),
+                                            OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars)
+                    guard st == noErr, len == 1, let c = String(utf16CodeUnits: chars, count: len).first,
+                          !c.isNewline, m[c] == nil else { continue }
+                    if c.unicodeScalars.first.map({ $0.value < 32 || $0.value == 127 }) == true { continue }
+                    m[c] = (CGKeyCode(code), flags)
+                }
+            }
+        }
+        map = m
+        layoutID = id
     }
 }

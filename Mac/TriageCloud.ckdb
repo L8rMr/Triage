@@ -1,0 +1,54 @@
+DEFINE SCHEMA
+
+    RECORD TYPE TriageMac (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        lan             LIST<STRING>,
+        macID           STRING,
+        mode            STRING,
+        name            STRING,
+        port            INT64,
+        publicHost      STRING,
+        publicPort      INT64,
+        quicPort        INT64,
+        secret          BYTES,
+        seen            TIMESTAMP,
+        tailscale       STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE TriagePunch (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        at              TIMESTAMP,
+        macHost         STRING,
+        macPort         INT64,
+        phoneHost       STRING,
+        phonePort       INT64,
+        state           STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Users (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        roles           LIST<INT64>,
+        GRANT WRITE TO "_creator",
+        GRANT READ TO "_world"
+    );
