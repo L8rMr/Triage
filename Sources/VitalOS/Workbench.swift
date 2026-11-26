@@ -176,6 +176,13 @@ struct WorkbenchRail: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var monitor: SystemMonitor
     @Environment(\.openSettings) private var openSettings
+    @AppStorage("utilities.pinned") private var pinnedRaw = "clean,tidy,clipboard,pdf"
+    @State private var dropTargeted = false
+
+    /// Favorite tools that aren't already a page in the rail.
+    private var favorites: [ToolID] {
+        pinnedRaw.split(separator: ",").compactMap { ToolID(rawValue: String($0)) }.filter { $0 != .clean }   // Space is already a page
+    }
 
     static let items: [RailItem] = [
         RailItem(id: "home", label: "Home", symbol: "house.fill", route: .home),
@@ -183,17 +190,15 @@ struct WorkbenchRail: View {
         RailItem(id: "files", label: "Files", symbol: "folder.fill", route: .files),
         RailItem(id: "space", label: "Space", symbol: "internaldrive.fill", route: .clean),
         RailItem(id: "apps", label: "Apps", symbol: "square.grid.2x2.fill", route: .apps),
-        RailItem(id: "mac", label: "Mac", symbol: "cpu.fill", route: .hardware),
         RailItem(id: "tools", label: "Tools", symbol: "wrench.and.screwdriver.fill", route: .utilities),
-        RailItem(id: "pdf", label: "PDF", symbol: "doc.richtext.fill", route: .tool(.pdf)),
     ]
 
     private func isOn(_ r: Route) -> Bool {
         switch (model.route ?? .home, r) {
         case (.place, .files), (.files, .files): return true
         case (.tidy, .clean): return true
-        case (.tool(.pdf), .tool(.pdf)): return true
-        case (.tool(let x), .utilities): return x != .pdf
+        case (.hardware, .heart): return true
+        case (.tool(let x), .utilities): return !Favorites.list.contains(x.rawValue)   // favorites light up themselves
         case let (a, b): return a == b
         }
     }
@@ -220,7 +225,8 @@ struct WorkbenchRail: View {
                     if item.id == "files" { Button("Open in Two Panes") { model.route = .files; if model.panes.count < 2 { model.toggleSplit() } } }
                 }
             }
-            Spacer()
+            favoritesSection
+            Spacer(minLength: 0)
             Button { openSettings() } label: {
                 Image(systemName: "gearshape.fill").font(.system(size: 16)).frame(width: 64, height: 44).foregroundStyle(.secondary).contentShape(Rectangle())
             }
@@ -229,7 +235,58 @@ struct WorkbenchRail: View {
         .padding(.vertical, 12)
         .frame(width: 84.d)
         .background(SidebarFill())
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [5, 4])).padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        // drop a tool card here to make it a favorite (or drop a favorite back on the rail to move it to the end)
+        .dropDestination(for: String.self) { items, _ in
+            var changed = false
+            for s in items {
+                guard let raw = FavoriteDrag.tool(from: s) else { continue }
+                Favorites.add(raw); changed = true
+            }
+            return changed
+        } isTargeted: { dropTargeted = $0 }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.stroke).frame(width: 1) }
+    }
+
+    @ViewBuilder private var favoritesSection: some View {
+        if !favorites.isEmpty || dropTargeted {
+            Rectangle().fill(Theme.stroke).frame(width: 36, height: 1).padding(.vertical, 6)
+        }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 4) {
+                ForEach(favorites) { t in
+                    let on = model.route == t.route
+                    VStack(spacing: 4) {   // same size as the pages above
+                        Image(systemName: t.symbol).font(.system(size: 18))
+                        Text(t.title).font(.ui(size: 10, weight: .medium)).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .frame(width: 64.d, height: 56.d)
+                    .foregroundStyle(on ? Theme.selectionText : Color.secondary)
+                    .background(on ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: min(14, ThemeStore.shared.current.radius + 4), style: .continuous))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.route = t.route }
+                    .accessibilityAddTraits(.isButton)
+                    .help("\(t.title) · drag off the sidebar to remove")
+                    .draggable(FavoriteDrag.fav(t)) {
+                        Label(t.title, systemImage: t.symbol).padding(8).background(.regularMaterial, in: Capsule())
+                    }
+                    .contextMenu {
+                        Button("Open \(t.title)") { model.route = t.route }
+                        Button("Remove from Sidebar") { Favorites.remove(t.rawValue) }
+                    }
+                }
+                if dropTargeted {
+                    Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
+                        .frame(width: 64.d, height: 40.d)
+                }
+            }
+        }
+        .frame(maxHeight: 420)
     }
 
     @ViewBuilder private func badge(_ item: RailItem) -> some View {
@@ -258,6 +315,7 @@ struct WorkbenchHome: View {
         let s = monitor.snap
         let heart = monitor.heart
         let color = heart?.color ?? Theme.accent
+        GeometryReader { geo in
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -321,44 +379,61 @@ struct WorkbenchHome: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("JUMP TO").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                        ForEach(pinnedTools.split(separator: ",").compactMap { ToolID(rawValue: String($0)) }) { t in
-                            Button { model.route = t.route } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: t.symbol).foregroundStyle(Theme.accent).frame(width: 20)
-                                    Text(t.title).font(.ui(size: 13)).lineLimit(1)
-                                    Spacer(minLength: 0)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: jumpMinW), spacing: 12)], spacing: 12) {
+                        ForEach(jumpTools) { t in
+                            jumpTile(t.title, t.symbol) { model.route = t.route }
+                                .contextMenu {
+                                    Button("Open \(t.title)") { model.route = t.route }
+                                    Button("Remove from Favorites") { Favorites.remove(t.rawValue) }
                                 }
-                                .padding(.horizontal, 12).frame(height: 40.d).glass(10).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Open \(t.title)") { model.route = t.route }
-                                Button("Unpin from Home") { pinnedTools = pinnedTools.split(separator: ",").filter { $0 != t.rawValue }.joined(separator: ",") }
-                            }
                         }
                         ForEach(Places.favorites + model.pinned, id: \.path) { u in
-                            Button { model.route = .files; model.active.go(u) } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: Places.symbol(u)).foregroundStyle(Theme.accent).frame(width: 20)
-                                    Text(Places.name(u)).font(.ui(size: 13)).lineLimit(1)
-                                    Spacer(minLength: 0)
+                            jumpTile(Places.name(u), Places.symbol(u)) { model.route = .files; model.active.go(u) }
+                                .contextMenu {
+                                    Button("Open") { model.route = .files; model.active.go(u) }
+                                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+                                    Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.path, forType: .string) }
                                 }
-                                .padding(.horizontal, 12).frame(height: 40.d).glass(10).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Open") { model.route = .files; model.active.go(u) }
-                                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([u]) }
-                                Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.path, forType: .string) }
-                            }
                         }
                     }
                 }
+                .background(GeometryReader { g in Color.clear.preference(key: JumpTopKey.self, value: g.frame(in: .named("home")).minY) })
             }
             .padding(28.d)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .coordinateSpace(name: "home")
+        .onPreferenceChange(JumpTopKey.self) { jumpTop = $0 }
+        .onAppear { pageSize = geo.size }
+        .onChange(of: geo.size) { _, v in pageSize = v }
+        }
+    }
+
+    // Jump To fills the page down to ~85% of its height; the last 15% stays empty.
+    @State private var jumpTop: CGFloat = 400
+    @State private var pageSize: CGSize = .zero
+    private var jumpTools: [ToolID] { pinnedTools.split(separator: ",").compactMap { ToolID(rawValue: String($0)) } }
+    private var jumpCount: Int { jumpTools.count + Places.favorites.count + model.pinned.count }
+    private var jumpMinW: CGFloat { pageSize.width > 1300 ? 190 : 160 }
+    private var jumpTileH: CGFloat {
+        let w = max(pageSize.width - 56.d, 200), gap: CGFloat = 12
+        let cols = max(1, Int((w + gap) / (jumpMinW + gap)))
+        let rows = max(1, Int(ceil(Double(jumpCount) / Double(cols))))
+        let room = pageSize.height * 0.85 - jumpTop - 28   // below the JUMP TO label
+        return min(260, max(64, (room - gap * CGFloat(rows - 1)) / CGFloat(rows)))
+    }
+
+    private func jumpTile(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        let h = jumpTileH
+        return Button(action: action) {
+            VStack(spacing: h > 100 ? 10 : 6) {
+                Image(systemName: symbol).font(.system(size: max(18, h * 0.3), weight: .medium)).foregroundStyle(Theme.accent)
+                Text(title).font(.ui(size: h > 100 ? 14 : 12, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity).frame(height: h)
+            .glass(14).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func run(_ a: Suggestion.Action) {
@@ -644,4 +719,43 @@ struct AppsHub: View {
             if tab == "installed" { ToolID.uninstaller.page } else { AppsView() }
         }
     }
+}
+
+
+/// Favorite tools: shown in the sidebar and in Home's Jump To. Stored as a comma list in "utilities.pinned".
+enum Favorites {
+    static let key = "utilities.pinned"
+    static var list: [String] {
+        (UserDefaults.standard.string(forKey: key) ?? "clean,tidy,clipboard,pdf").split(separator: ",").map(String.init)
+    }
+    static func add(_ raw: String) {
+        var l = list.filter { $0 != raw }; l.append(raw)
+        UserDefaults.standard.set(l.joined(separator: ","), forKey: key)
+    }
+    static func remove(_ raw: String) {
+        UserDefaults.standard.set(list.filter { $0 != raw }.joined(separator: ","), forKey: key)
+    }
+}
+
+/// What a dragged tool carries: a tool card says "add me", a sidebar favorite says "I'm already there".
+enum FavoriteDrag {
+    static func card(_ t: ToolID) -> String { "vitalos-tool:" + t.rawValue }
+    static func fav(_ t: ToolID) -> String { "vitalos-fav:" + t.rawValue }
+    /// Any tool drag, card or favorite, as a ToolID raw value.
+    static func tool(from s: String) -> String? {
+        for p in ["vitalos-tool:", "vitalos-fav:"] where s.hasPrefix(p) {
+            let raw = String(s.dropFirst(p.count)); return ToolID(rawValue: raw) != nil ? raw : nil
+        }
+        return nil
+    }
+    static func favorite(from s: String) -> String? {
+        guard s.hasPrefix("vitalos-fav:") else { return nil }
+        return String(s.dropFirst("vitalos-fav:".count))
+    }
+}
+
+
+private struct JumpTopKey: PreferenceKey {
+    static var defaultValue: CGFloat = 400
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

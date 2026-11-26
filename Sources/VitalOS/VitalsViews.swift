@@ -228,10 +228,30 @@ struct HardwareView: View {
         }
     }
 
+    /// Inside the Heart page: no scroll view or page title of its own, just a section.
+    var embedded = false
+    private var macLine: String { "\(chip) · \(modelID) · macOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).\(ProcessInfo.processInfo.operatingSystemVersion.minorVersion)" }
+
     var body: some View {
-        ScrollView {
+        if embedded {
+            content.vitalDetail($detail, monitor: monitor, model: model)
+        } else {
+            ScrollView { content.padding(28).padding(.top, 8) }
+                .vitalDetail($detail, monitor: monitor, model: model)
+        }
+    }
+
+    private var content: some View {
             VStack(alignment: .leading, spacing: 18) {
-                PageTitle(title: "Hardware", subtitle: "\(chip) · \(modelID) · macOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).\(ProcessInfo.processInfo.operatingSystemVersion.minorVersion)")
+                if embedded {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("YOUR MAC").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
+                        Text(macLine).font(.ui(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 10)
+                } else {
+                    PageTitle(title: "Hardware", subtitle: macLine)
+                }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
                     StatCard(title: "Processor", value: Fmt.pct(monitor.snap.cpu),
@@ -293,10 +313,6 @@ struct HardwareView: View {
                 }
                 Text("Click any card to see what's behind it.").font(.ui(size: 11)).foregroundStyle(.tertiary)
             }
-            .padding(28)
-            .padding(.top, 8)
-        }
-        .vitalDetail($detail, monitor: monitor, model: model)
     }
 
     private var memoryCard: some View {
@@ -378,11 +394,29 @@ struct MenuBarLabel: View {
 
     var body: some View {
         let text = MenuBarText.compose(monitor, items: items, icon: showIcon)
-        if showIcon {
-            Text("\(Image(systemName: "heart.fill")) \(text)")
-        } else {
-            Text(text)
+        // the menu bar drops images that sit inside Text, so draw heart + reading as one template image
+        Image(nsImage: MenuBarImage.make(icon: showIcon || text.isEmpty, text: text))
+    }
+}
+
+enum MenuBarImage {
+    static func make(icon: Bool, text: String) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let t = text as NSString
+        let ts = text.isEmpty ? .zero : t.size(withAttributes: attrs)
+        let heart = icon ? NSImage(systemSymbolName: "heart.fill", accessibilityDescription: "VitalOS")?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold)) : nil
+        let hs = heart?.size ?? .zero
+        let gap: CGFloat = heart != nil && !text.isEmpty ? 4 : 0
+        let size = NSSize(width: ceil(hs.width + gap + ts.width), height: 18)
+        let img = NSImage(size: size, flipped: false) { _ in
+            if let heart { heart.draw(in: NSRect(x: 0, y: (18 - hs.height) / 2, width: hs.width, height: hs.height)) }
+            if !text.isEmpty { t.draw(at: NSPoint(x: hs.width + gap, y: (18 - ts.height) / 2), withAttributes: attrs) }
+            return true
         }
+        img.isTemplate = true   // the menu bar tints it for light, dark and highlighted
+        return img
     }
 }
 

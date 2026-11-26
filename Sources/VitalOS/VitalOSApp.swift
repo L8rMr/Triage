@@ -160,6 +160,12 @@ struct RootView: View {
                     Theme.bg.ignoresSafeArea()
                     detail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        // a sidebar favorite dropped anywhere off the sidebar comes off the favorites
+                        .dropDestination(for: String.self) { items, _ in
+                            let gone = items.compactMap(FavoriteDrag.favorite(from:))
+                            gone.forEach(Favorites.remove)
+                            return !gone.isEmpty
+                        }
                     TourOverlay()
                         .animation(.spring(duration: 0.35), value: model.tourIndex)
                         .animation(.spring(duration: 0.35), value: model.tourActive)
@@ -229,7 +235,7 @@ struct RootView: View {
         case .search: SearchPage()
         case .heart: HeartView()
         case .apps: AppsHub()
-        case .hardware: HardwareView()
+        case .hardware: HeartView()   // the Mac page lives at the bottom of Heart now
         case .files, .place: FilesWorkspace()
         case .clean: CleanView()
         case .tidy: TidyView()

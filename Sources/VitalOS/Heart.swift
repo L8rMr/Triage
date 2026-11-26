@@ -133,7 +133,7 @@ struct HeartView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 PageTitle(title: "Heart",
-                          subtitle: "One heartbeat for your whole Mac: processor, memory, heat, disk and battery, read every 1.5 seconds.")
+                          subtitle: "One heartbeat for your whole Mac: processor, memory, heat, disk and battery, read every 1.5 seconds. Your Mac's hardware is at the bottom.")
                 if let h = monitor.heart {
                     bedside(h)
                     raising(h)
@@ -150,6 +150,8 @@ struct HeartView: View {
                 } else {
                     ProgressView("Finding a pulse…").frame(maxWidth: .infinity).padding(40)
                 }
+                // what used to be the Mac page: chip, memory, network, battery, heat, disk
+                HardwareView(embedded: true)
             }
             .padding(28)
             .padding(.top, 8)

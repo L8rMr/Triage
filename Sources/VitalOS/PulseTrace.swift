@@ -56,6 +56,8 @@ private struct PulseLayerView: NSViewRepresentable {
 }
 
 final class PulseNSView: NSView {
+    // decoration only: let clicks fall through to the button or card it sits in (the header pill ignored clicks)
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
     private var bpm = 60.0, span = 3.0, still = false
     private var color: NSColor = .systemGreen
     private let fresh = CAShapeLayer(), old = CAShapeLayer(), dot = CAShapeLayer(), halo = CAShapeLayer()

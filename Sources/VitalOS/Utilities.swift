@@ -157,8 +157,7 @@ struct UtilitiesView: View {
 
     private func card(_ t: ToolID) -> some View {
         let isPinned = pinned.contains(t.rawValue)
-        return Button { model.route = t.route } label: {
-            VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Image(systemName: t.symbol)
                         .font(.ui(size: 20, weight: .medium))
@@ -174,7 +173,7 @@ struct UtilitiesView: View {
                         Image(systemName: isPinned ? "star.fill" : "star").foregroundStyle(isPinned ? Color.yellow : Color.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(isPinned ? "Unpin from Home" : "Pin to Home")
+                    .help(isPinned ? "Remove from favorites (sidebar and Home)" : "Add to favorites (sidebar and Home) — or drag the card onto the sidebar")
                 }
                 Text(t.title).font(.ui(size: 14, weight: .semibold))
                 Text(t.blurb).font(.ui(size: 12)).foregroundStyle(.secondary)
@@ -186,11 +185,13 @@ struct UtilitiesView: View {
             .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
             .glass(14)
             .contentShape(Rectangle())
+            .onTapGesture { model.route = t.route }   // a tap, not a Button: Buttons swallow the mouse so drags never start
+        .draggable(FavoriteDrag.card(t)) {   // drag onto the sidebar to make it a favorite
+            Label(t.title, systemImage: t.symbol).padding(8).background(.regularMaterial, in: Capsule())
         }
-        .buttonStyle(.plain)
         .contextMenu {
             Button("Open \(t.title)") { model.route = t.route }
-            Button(isPinned ? "Unpin from Home" : "Pin to Home") {
+            Button(isPinned ? "Remove from Favorites" : "Add to Favorites") {
                 var p = pinned
                 if isPinned { p.removeAll { $0 == t.rawValue } } else { p.append(t.rawValue) }
                 pinnedRaw = p.joined(separator: ",")
