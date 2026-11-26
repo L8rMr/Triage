@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Carbon.HIToolbox
+import Combine
 
 /// System-wide hotkey (⌥Space) through Carbon: works in every app, no Accessibility permission needed.
 final class HotKey {
@@ -48,6 +49,12 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
     private var monitor: Any?
     /// The app you were in, so closing the panel hands the keyboard straight back to it.
     private var previous: NSRunningApplication?
+    /// Spotlight-style: just the field until you type, then the results unfold downward from a fixed top edge.
+    static let collapsedHeight: CGFloat = 68
+    static let expandedHeight: CGFloat = 520
+    private var topY: CGFloat = 0
+    private var expanded = false
+    private var textSub: AnyCancellable?
 
     var isVisible: Bool { panel?.isVisible == true }
 
@@ -60,11 +67,16 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         guard let panel else { return }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        engine.text = ""
+        expanded = false
         if let f = screen?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: f.midX - panel.frame.width / 2,
-                                         y: f.maxY - f.height * 0.18 - panel.frame.height))
+            topY = f.maxY - f.height * 0.18
+            panel.setFrame(NSRect(x: f.midX - 400, y: topY - Self.collapsedHeight, width: 800, height: Self.collapsedHeight), display: true)
         }
         engine.refresh()
+        // fade in rather than pop
+        panel.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { c in c.duration = 0.14; c.timingFunction = CAMediaTimingFunction(name: .easeOut); panel.animator().alphaValue = 1 }
         // Typing only reaches us if VitalOS is the active app: a panel can be key while keystrokes still go to
         // whatever app was in front. Activate, show the panel, then put the cursor in the field ourselves.
         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier { previous = front }
@@ -97,6 +109,20 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         previous = nil
     }
 
+    /// Grow or shrink the panel with its top edge pinned, so the field never moves under your cursor.
+    private func setExpanded(_ on: Bool) {
+        guard let panel, panel.isVisible, on != expanded else { return }
+        expanded = on
+        let h = on ? Self.expandedHeight : Self.collapsedHeight
+        let target = NSRect(x: panel.frame.minX, y: topY - h, width: panel.frame.width, height: h)
+        NSAnimationContext.runAnimationGroup { c in
+            c.duration = on ? 0.22 : 0.16
+            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)   // quick out, soft landing
+            c.allowsImplicitAnimation = true
+            panel.animator().setFrame(target, display: true)
+        }
+    }
+
     private func focusField() {
         guard let panel, panel.isVisible else { return }
         if !panel.isKeyWindow { panel.makeKey() }
@@ -115,7 +141,7 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
     func windowDidResignKey(_ notification: Notification) { hide() }
 
     private func build() {
-        let p = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 800, height: 520),
+        let p = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 800, height: GlobalSearch.collapsedHeight),
                             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                             backing: .buffered, defer: false)
         p.level = .floating
@@ -128,7 +154,12 @@ final class GlobalSearch: NSObject, NSWindowDelegate {
         p.hidesOnDeactivate = false
         p.delegate = self
         engine.onClose = { [weak self] in self?.hide() }
-        p.contentView = NSHostingView(rootView: SmartSearchView(engine: engine))
+        textSub = engine.$text.receive(on: RunLoop.main).sink { [weak self] t in
+            self?.setExpanded(!t.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        let host = NSHostingView(rootView: SmartSearchView(engine: engine))
+        host.sizingOptions = []          // the panel decides its size (and animates it); SwiftUI just fills it
+        p.contentView = host
         panel = p
     }
 }
@@ -149,6 +180,7 @@ struct VisualEffect: NSViewRepresentable {
 struct SmartSearchView: View {
     @ObservedObject var engine: SmartSearch
     @FocusState private var focused: Bool
+    private var hasText: Bool { !engine.text.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -163,9 +195,16 @@ struct SmartSearchView: View {
                 SearchStatus(engine: engine)
             }
             .padding(.horizontal, 18).padding(.vertical, 15)
-            SearchResultsBody(engine: engine, inline: false)
+            .frame(height: GlobalSearch.collapsedHeight)
+            if hasText {
+                Divider().opacity(0.5)
+                SearchResultsBody(engine: engine, inline: false)
+                    .transition(.opacity.combined(with: .offset(y: -6)))
+            }
         }
-        .frame(width: 800, height: 520)
+        .frame(width: 800)
+        .frame(maxHeight: .infinity, alignment: .top)     // follows the panel as it unfolds
+        .animation(.easeOut(duration: 0.18), value: hasText)
         .background(VisualEffect(material: .popover))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
