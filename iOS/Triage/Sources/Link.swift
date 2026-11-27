@@ -33,7 +33,8 @@ enum Route {
         switch self {
         case .lan: return "Wi-Fi"
         case .address(_, let l): return l
-        case .direct, .p2p: return "Internet (direct)"
+        case .direct: return "Internet (QUIC)"
+        case .p2p: return "Internet (iCloud knock)"
         }
     }
 }
@@ -162,7 +163,7 @@ final class MacLink: ObservableObject {
         if let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
         if PathWatch.shared.onWiFi { p += mac.lan.prefix(2).map { .address("\($0):\(mac.port)", "Wi-Fi") } }
         // Away: the router's TCP door first (gets through every carrier and relay), then QUIC, then a knock.
-        if let h = mac.publicHost, let t = mac.tcpPort { p.append(.address("\(h):\(t)", "Internet (direct)")) }
+        if let h = mac.publicHost, let t = mac.tcpPort { p.append(.address("\(h):\(t)", "Internet (router door)")) }
         if mac.publicHost != nil { p.append(.direct(mac)) }
         p.append(.p2p(mac))
         return p
@@ -172,9 +173,26 @@ final class MacLink: ObservableObject {
     @Published private(set) var notes: [String] = []
     private func note(_ s: String) { DispatchQueue.main.async { self.notes = Array((self.notes + [s]).suffix(8)) } }
 
+    /// What the phone is doing right now, and since when (shown live on the connect screen).
+    @Published private(set) var step = ""
+    @Published private(set) var startedAt = Date()
+    private func say(_ s: String) { DispatchQueue.main.async { self.step = s } }
+    /// A first connection gives up after this long and says why; a link that was up keeps retrying.
+    static let giveUpAfter: TimeInterval = 16
+    private var connectedOnce = false
+    private var startID = 0
+
     private func start(_ routes: [Route], cloud: CloudMac?) {
-        DispatchQueue.main.async { self.notes = [] }
+        DispatchQueue.main.async { self.notes = []; self.step = "Starting"; self.startedAt = Date() }
         q.async {
+            self.connectedOnce = false
+            self.startID += 1
+            let round = self.startID
+            self.q.asyncAfter(deadline: .now() + Self.giveUpAfter) { [weak self] in
+                guard let self, self.wantConnected, !self.connectedOnce, self.key == nil, self.startID == round else { return }
+                self.note("Gave up after \(Int(Self.giveUpAfter)) seconds")
+                self.fail("Couldn't reach \(cloud?.name ?? self.target?.id ?? "your Mac") in \(Int(Self.giveUpAfter)) seconds")
+            }
             self.wantConnected = true
             self.cloudMac = cloud
             self.plan = routes
@@ -193,6 +211,12 @@ final class MacLink: ObservableObject {
         }
         let r = plan.removeFirst()
         label = r.label
+        switch r {
+        case .lan: say("Looking on this Wi-Fi")
+        case .address(let h, let l): say(l == "Wi-Fi" ? "Trying the Mac's Wi-Fi address \(h)" : "Trying \(l.lowercased()) at \(h)")
+        case .direct(let m): say("Trying a fast internet link (QUIC) to \(m.publicHost ?? "")")
+        case .p2p: say("Asking the Mac through iCloud to open a door")
+        }
         switch r {
         case .lan(let m): target = m; open()
         case .address(let h, let l):
@@ -229,6 +253,7 @@ final class MacLink: ObservableObject {
     /// This way in didn't work. On q.
     private func fellThrough(_ why: String) {
         note("\(label): \(why)")
+        if !plan.isEmpty { say("\(label) didn't answer · trying the next way") }
         if !plan.isEmpty { teardown(); next() } else { lost(why) }
     }
 
@@ -272,11 +297,10 @@ final class MacLink: ObservableObject {
         if label != "Wi-Fi", PathWatch.shared.vpn, let i = PathWatch.shared.physical { params.requiredInterface = i }
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
-        if !plan.isEmpty {
-            q.asyncAfter(deadline: .now() + (target.quic || label != "Wi-Fi" ? 7 : 3.5)) { [weak self] in
-                guard let self, self.gen == g, !self.heard else { return }
-                self.fellThrough("Timed out")
-            }
+        let wait: Double = target.quic || label != "Wi-Fi" ? 5 : 3
+        q.asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self, self.gen == g, !self.heard, self.key == nil else { return }
+            self.fellThrough("No answer in \(Int(wait)) s")
         }
         do {
             self.quic = target.quic
@@ -287,7 +311,9 @@ final class MacLink: ObservableObject {
             c.stateUpdateHandler = { [weak self, weak c] st in
                 guard let self, let c, c === self.conn else { return }
                 switch st {
-                case .ready: self.sendPlain(["t": "hello", "v": 1, "id": self.deviceID, "name": self.deviceName,
+                case .ready:
+                    self.say("Reached the Mac · saying hello")
+                    self.sendPlain(["t": "hello", "v": 1, "id": self.deviceID, "name": self.deviceName,
                                              "cloud": CloudDirectory.knownMacIDs,
                                              "pub": self.eph.publicKey.rawRepresentation.base64EncodedString()])
                 case .failed(let e): self.dropped("Couldn't reach \(target.id): \(e.localizedDescription)")
@@ -378,7 +404,7 @@ final class MacLink: ObservableObject {
         teardown()
         guard wantConnected else { return }
         attempt += 1
-        if wasReady || attempt <= 6 {
+        if wasReady || (connectedOnce && attempt <= 6) {
             DispatchQueue.main.async { if wasReady { self.reconnecting = true } }
             let delay = min(Double(attempt) * 1.5, 8)
             q.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -463,6 +489,7 @@ final class MacLink: ObservableObject {
             serverPub = pub
             nonce = n
             heard = true
+            say("The Mac answered · checking this iPhone is paired")
             macID = o["macID"] as? String ?? (o["name"] as? String)
             let name = o["name"] as? String ?? "Mac"
             let paired = o["paired"] as? Bool ?? false
@@ -519,6 +546,8 @@ final class MacLink: ObservableObject {
         case "ready":
             if let (id, s) = pendingSecret { Keychain.set(s, for: id); pendingSecret = nil }
             attempt = 0
+            connectedOnce = true
+            say("Connected over \(label)")
             let body = o["body"] as? [String: Any] ?? [:]
             let info: MacInfo? = decode(body)
             let mode = body["mode"] as? String ?? "view"

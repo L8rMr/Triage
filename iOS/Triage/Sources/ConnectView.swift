@@ -23,7 +23,7 @@ struct ConnectView: View {
                 switch link.phase {
                 case .needsCode(let wrong): codeEntry(wrong: wrong)
                 case .failed(let why): failed(why)
-                case .connecting: ProgressView().controlSize(.large)
+                case .connecting: connecting
                 default: macList
                 }
             }
@@ -46,7 +46,7 @@ struct ConnectView: View {
 
     private var title: String {
         switch link.phase {
-        case .connecting(let n): return "Finding \(n)'s pulse"
+        case .connecting(let n): return "Connecting to \(n)"
         case .needsCode: return "Type the code on your Mac"
         case .failed: return "Lost the pulse"
         default: return browser.macs.isEmpty && awayMacs.isEmpty ? "Looking for your Mac" : "Pick your Mac"
@@ -111,16 +111,7 @@ struct ConnectView: View {
                     Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
-            if !link.notes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("What happened").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                    ForEach(link.notes, id: \.self) { Text("• " + $0).font(.caption).foregroundStyle(.secondary) }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color.glass700, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.top, 10)
-            }
+            if !link.notes.isEmpty { notesCard.padding(.top, 10) }
             if case .failed = link.phase, awayMacs.isEmpty, !cloud.status.isEmpty {
                 Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
@@ -177,6 +168,40 @@ struct ConnectView: View {
             Text(why).font(.callout).foregroundStyle(Color.amber).multilineTextAlignment(.center)
             Button("Try again") { link.disconnect() }
                 .buttonStyle(.borderedProminent)
+            if !link.notes.isEmpty { notesCard }
         }
+    }
+
+    /// Live: what the phone is trying right now, how long it's been, and each way in that didn't work.
+    private var connecting: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(link.step.isEmpty ? "Starting" : link.step).font(.callout.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .contentTransition(.opacity)
+                    .animation(.snappy, value: link.step)
+            }
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let t = Int(ctx.date.timeIntervalSince(link.startedAt))
+                let left = max(Int(MacLink.giveUpAfter) - t, 0)
+                VStack(spacing: 6) {
+                    ProgressView(value: min(Double(t) / MacLink.giveUpAfter, 1)).tint(.phosphor).frame(maxWidth: 240)
+                    Text("\(t) s · gives up in \(left) s").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            if !link.notes.isEmpty { notesCard }
+            Button("Cancel") { link.disconnect() }.buttonStyle(.bordered)
+        }
+    }
+
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("What happened").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            ForEach(Array(link.notes.enumerated()), id: \.offset) { _, n in Text("• " + n).font(.caption).foregroundStyle(.secondary) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.glass700, in: RoundedRectangle(cornerRadius: 12))
     }
 }

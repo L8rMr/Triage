@@ -5,12 +5,13 @@ import AppIntents
 // MARK: - What you can choose
 
 enum Metric: String, AppEnum, CaseIterable {
-    case heart, cpu, memory, storage, battery, network, health, uptime
+    case cpu, memory, storage, battery, network, health, uptime, apps, temperature, heart, nothing
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Reading"
     static var caseDisplayRepresentations: [Metric: DisplayRepresentation] = [
-        .heart: "Heart rate", .cpu: "CPU", .memory: "Memory", .storage: "Storage",
-        .battery: "Battery", .network: "Network", .health: "Health score", .uptime: "Uptime",
+        .cpu: "CPU", .memory: "Memory", .storage: "Storage", .battery: "Battery", .network: "Network",
+        .health: "Health score", .uptime: "Uptime", .apps: "Busiest app", .temperature: "Temperature",
+        .heart: "Heart rate", .nothing: "Nothing",
     ]
 }
 
@@ -26,22 +27,31 @@ enum RefreshEvery: Int, AppEnum, CaseIterable {
 
 struct VitalsConfig: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Mac vitals"
-    static var description = IntentDescription("Pick what this widget shows. Bigger widgets show more.")
+    static var description = IntentDescription("Pick what each spot shows. Small uses spots 1–2, medium 1–4, large 1–6.")
 
-    @Parameter(title: "Main reading", default: .heart)
-    var main: Metric
+    @Parameter(title: "Spot 1", default: .cpu) var s1: Metric
+    @Parameter(title: "Spot 2", default: .memory) var s2: Metric
+    @Parameter(title: "Spot 3 (medium & large)", default: .storage) var s3: Metric
+    @Parameter(title: "Spot 4 (medium & large)", default: .network) var s4: Metric
+    @Parameter(title: "Spot 5 (large)", default: .battery) var s5: Metric
+    @Parameter(title: "Spot 6 (large)", default: .health) var s6: Metric
 
-    @Parameter(title: "More readings (medium & large)", default: [.cpu, .memory, .storage, .network])
-    var more: [Metric]
-
-    @Parameter(title: "Show the heartbeat line", default: true)
-    var trace: Bool
+    @Parameter(title: "Show the status line (large)", default: true)
+    var status: Bool
 
     @Parameter(title: "Show busiest apps (large)", default: true)
     var apps: Bool
 
     @Parameter(title: "Refresh when Triage is closed", default: .fifteen)
     var refresh: RefreshEvery
+
+    var spots: [Metric] { [s1, s2, s3, s4, s5, s6] }
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Show \(\.$s1), \(\.$s2)") {
+            \.$s3; \.$s4; \.$s5; \.$s6; \.$status; \.$apps; \.$refresh
+        }
+    }
 }
 
 // MARK: - Timeline
@@ -80,7 +90,7 @@ struct TriageVitalsWidget: Widget {
                 .widgetURL(URL(string: "triage://home"))
         }
         .configurationDisplayName("Mac vitals")
-        .description("Your Mac's pulse, memory, storage and more. Live while Triage is open.")
+        .description("Your Mac at a glance. Long-press › Edit Widget to choose what each spot shows.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryCircular])
     }
 }
@@ -117,155 +127,120 @@ struct VitalsView: View {
         .redacted(reason: entry.placeholder ? .placeholder : [])
     }
 
-    // Small: one reading, big, with its line.
+    private func spots(_ n: Int) -> [Metric] {
+        Array(entry.config.spots.prefix(n).filter { $0 != .nothing && !($0 == .battery && s.battery == nil) })
+    }
+
+    // Small: two readings as tiles.
     private var small: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             header(compact: true)
+            ForEach(spots(2), id: \.self) { m in tile(m) }
             Spacer(minLength: 0)
-            big(entry.config.main)
-            if entry.config.trace { line(entry.config.main).frame(height: 30) }
         }
     }
 
-    // Medium: the main reading and its line on the left, up to four more on the right.
+    // Medium: four tiles, two by two.
     private var medium: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                header(compact: true)
-                Spacer(minLength: 0)
-                big(entry.config.main)
-                if entry.config.trace { line(entry.config.main).frame(height: 34) }
+        VStack(alignment: .leading, spacing: 6) {
+            header(compact: false)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                ForEach(spots(4), id: \.self) { m in tile(m) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(extras.prefix(4)), id: \.self) { m in row(m) }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 0)
         }
     }
 
-    // Large: everything, plus the busiest apps.
+    // Large: status, six tiles, the busiest apps.
     private var large: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             header(compact: false)
-            HStack(alignment: .bottom) {
-                big(entry.config.main)
-                Spacer()
-                if let st = s.status { Text(st).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing).lineLimit(2) }
+            if entry.config.status, let st = s.status {
+                Label(st, systemImage: "stethoscope").font(.caption.weight(.semibold)).foregroundStyle(p.accent).lineLimit(1)
             }
-            if entry.config.trace { line(entry.config.main).frame(height: 54) }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-                ForEach(Array(extras.prefix(6)), id: \.self) { m in row(m) }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                ForEach(spots(6), id: \.self) { m in tile(m) }
             }
             if entry.config.apps && !s.top.isEmpty {
-                Divider().overlay(p.stroke)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("BUSIEST").font(.caption2.weight(.bold)).foregroundStyle(p.accent)
-                    ForEach(s.top.prefix(4), id: \.self) { a in
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("BUSIEST APPS", systemImage: "flame").font(.caption2.weight(.bold)).foregroundStyle(p.accent)
+                    ForEach(s.top.prefix(3), id: \.self) { a in
                         HStack {
+                            Image(systemName: "app.dashed").font(.caption2).foregroundStyle(.secondary)
                             Text(a.name).font(.caption).lineLimit(1)
                             Spacer()
                             Text(String(format: "%.0f%%", a.cpu)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                .contentTransition(.numericText(value: a.cpu))
                         }
                     }
                 }
+                .padding(8)
+                .background(p.card, in: RoundedRectangle(cornerRadius: min(p.radius, 12)))
             }
             Spacer(minLength: 0)
         }
     }
 
     private var circular: some View {
-        Gauge(value: min(s.bpm, 180), in: 40...180) {
-            Image(systemName: "heart.fill")
-        } currentValueLabel: { Text("\(Int(s.bpm))").contentTransition(.numericText(value: s.bpm)) }
+        Gauge(value: min(s.cpu, 100), in: 0...100) {
+            Image(systemName: "cpu")
+        } currentValueLabel: { Text("\(Int(s.cpu))") }
         .gaugeStyle(.accessoryCircular)
     }
 
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(s.mac).font(.caption.weight(.semibold)).lineLimit(1)
-            Text("\(Int(s.bpm)) bpm · CPU \(Int(s.cpu))%").font(.caption)
-            Text("Mem \(Int(s.memFraction * 100))% · \(bytes(s.diskFree)) free").font(.caption2).foregroundStyle(.secondary)
+            Label(s.mac, systemImage: "laptopcomputer").font(.caption.weight(.semibold)).lineLimit(1)
+            Text("CPU \(Int(s.cpu))% · Mem \(Int(s.memFraction * 100))%").font(.caption)
+            Text("\(bytes(s.diskFree)) free").font(.caption2).foregroundStyle(.secondary)
         }
-    }
-
-    private var extras: [Metric] {
-        var m = entry.config.more.filter { $0 != entry.config.main }
-        if s.battery == nil { m.removeAll { $0 == .battery } }
-        return m
     }
 
     // MARK: Pieces
 
     private func header(compact: Bool) -> some View {
         HStack(spacing: 5) {
-            Circle().fill(s.connected && fresh ? p.good : p.heat).frame(width: 6, height: 6)
+            Image(systemName: "laptopcomputer").font(.caption2.weight(.bold)).foregroundStyle(p.accent)
             Text(s.mac).font(.caption2.weight(.bold)).lineLimit(1)
+            Circle().fill(s.connected && fresh ? p.good : p.heat).frame(width: 5, height: 5)
             Spacer(minLength: 2)
-            // the age ticks by itself, so you always know how fresh this is
             Text(s.t, style: .relative).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
-                .frame(maxWidth: compact ? 52 : 90, alignment: .trailing)
+                .frame(maxWidth: compact ? 48 : 90, alignment: .trailing)
         }
     }
 
     private var fresh: Bool { Date().timeIntervalSince(s.t) < 600 }
 
-    private func big(_ m: Metric) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label(title(m), systemImage: symbol(m)).font(.caption2.weight(.bold)).foregroundStyle(tint(m))
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value(m)).font(.system(size: 34, weight: .bold, design: p.mono ? .monospaced : .rounded))
-                    .contentTransition(.numericText(value: number(m)))
-                    .minimumScaleFactor(0.5).lineLimit(1)
-                Text(unit(m)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func row(_ m: Metric) -> some View {
+    /// One reading, drawn like the app's cards: icon and label, value, a thin bar when it's a share of something.
+    private func tile(_ m: Metric) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
-                Image(systemName: symbol(m)).font(.caption2).foregroundStyle(tint(m))
-                Text(title(m)).font(.caption2).foregroundStyle(.secondary)
-                Spacer(minLength: 2)
-                Text(value(m) + unit(m)).font(.caption.weight(.semibold).monospacedDigit())
-                    .contentTransition(.numericText(value: number(m)))
+                Image(systemName: symbol(m)).font(.caption2.weight(.semibold)).foregroundStyle(tint(m))
+                Text(title(m)).font(.caption2.weight(.bold)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value(m)).font(.system(size: 18, weight: .bold, design: p.mono ? .monospaced : .rounded))
+                    .minimumScaleFactor(0.6).lineLimit(1)
+                Text(unit(m)).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
             if let f = fraction(m) {
                 GeometryReader { g in
                     Capsule().fill(tint(m).opacity(0.2))
-                        .overlay(alignment: .leading) { Capsule().fill(tint(m)).frame(width: max(2, g.size.width * f)) }
+                        .overlay(alignment: .leading) { Capsule().fill(tint(m)).frame(width: max(2, g.size.width * min(max(f, 0), 1))) }
                 }
-                .frame(height: 4)
+                .frame(height: 3)
             }
         }
-    }
-
-    /// The heartbeat (or CPU) trace: the last minute, drawn like the app's monitor.
-    private func line(_ m: Metric) -> some View {
-        let vals = m == .cpu ? s.cpuHistory : s.bpmHistory
-        let color = tint(m == .cpu ? .cpu : .heart)
-        return GeometryReader { g in
-            if vals.count > 1 {
-                let lo = (vals.min() ?? 0) - 2, hi = (vals.max() ?? 1) + 2
-                Path { path in
-                    for (i, v) in vals.enumerated() {
-                        let x = g.size.width * CGFloat(i) / CGFloat(vals.count - 1)
-                        let y = g.size.height * (1 - CGFloat((v - lo) / max(hi - lo, 1)))
-                        if i == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
-                    }
-                }
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                .shadow(color: p.glow ? color.opacity(0.7) : .clear, radius: 3)
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(p.card, in: RoundedRectangle(cornerRadius: min(p.radius, 12)))
+        .overlay(RoundedRectangle(cornerRadius: min(p.radius, 12)).stroke(p.stroke, lineWidth: 0.5))
     }
 
     private func title(_ m: Metric) -> String {
         switch m {
         case .heart: return "HEART"; case .cpu: return "CPU"; case .memory: return "MEMORY"; case .storage: return "STORAGE"
-        case .battery: return "BATTERY"; case .network: return "NETWORK"; case .health: return "HEALTH"; case .uptime: return "UP"
+        case .battery: return "BATTERY"; case .network: return "NETWORK"; case .health: return "HEALTH"; case .uptime: return "UPTIME"
+        case .apps: return "BUSIEST"; case .temperature: return "TEMP"; case .nothing: return ""
         }
     }
 
@@ -273,7 +248,8 @@ struct VitalsView: View {
         switch m {
         case .heart: return "waveform.path.ecg"; case .cpu: return "cpu"; case .memory: return "memorychip"
         case .storage: return "internaldrive"; case .battery: return s.charging == true ? "battery.100.bolt" : "battery.75"
-        case .network: return "arrow.up.arrow.down"; case .health: return "heart.text.square"; case .uptime: return "clock"
+        case .network: return "arrow.up.arrow.down"; case .health: return "stethoscope"; case .uptime: return "clock"
+        case .apps: return "flame"; case .temperature: return "thermometer.medium"; case .nothing: return "circle"
         }
     }
 
@@ -283,6 +259,7 @@ struct VitalsView: View {
         case .memory: return (s.pressure ?? 0) >= 2 ? p.warn : p.accent
         case .storage: return s.diskUsedFraction > 0.9 ? p.warn : p.accent
         case .battery: return (s.battery ?? 100) < 20 ? p.warn : p.good
+        case .temperature: return (s.thermal ?? 0) >= 2 ? p.warn : (s.thermal ?? 0) == 1 ? p.heat : p.good
         default: return p.accent
         }
     }
@@ -293,6 +270,7 @@ struct VitalsView: View {
         case .storage: return s.diskFree / 1e9; case .battery: return s.battery ?? 0
         case .network: return (s.netIn + s.netOut) / 1e3; case .health: return Double(s.health ?? 0)
         case .uptime: return (s.uptime ?? 0) / 3600
+        case .apps: return s.top.first?.cpu ?? 0; case .temperature: return Double(s.thermal ?? 0); case .nothing: return 0
         }
     }
 
@@ -308,13 +286,17 @@ struct VitalsView: View {
         case .uptime:
             let u = s.uptime ?? 0
             return u > 86_400 ? "\(Int(u / 86_400))d" : "\(Int(u / 3600))h"
+        case .apps: return s.top.first?.name ?? "—"
+        case .temperature: return ["Cool", "Warm", "Hot", "Very hot"][min(max(s.thermal ?? 0, 0), 3)]
+        case .nothing: return ""
         }
     }
 
     private func unit(_ m: Metric) -> String {
         switch m {
         case .heart: return " bpm"; case .cpu, .memory, .battery: return "%"; case .storage: return " free"
-        case .network: return "/s"; case .health: return "/100"; case .uptime: return ""
+        case .network: return "/s"; case .health: return "/100"; case .uptime, .temperature, .nothing: return ""
+        case .apps: return s.top.first.map { String(format: " %.0f%%", $0.cpu) } ?? ""
         }
     }
 
