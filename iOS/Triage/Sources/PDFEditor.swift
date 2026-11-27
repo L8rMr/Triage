@@ -273,37 +273,82 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
 
     var selectedText: String { view.currentSelection?.string ?? "" }
 
-    /// "Edit" words: paper-colored cover over the selected lines, new words typed on top in a matching size.
-    func replaceSelection(with text: String, color: UIColor = .black) {
+    /// "Edit" words: white out the selected words and type the new ones in the same font, size, color and position,
+    /// read from the PDF itself. Numbers keep their right edge (columns of amounts stay lined up).
+    func replaceSelection(with text: String) {
         guard let sel = view.currentSelection else { return }
         let lines = sel.selectionsByLine()
         guard let first = lines.first, let page = first.pages.first else { return }
+        let old = (sel.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let look = Self.look(of: sel, fallbackSize: first.bounds(for: page).height * 0.8)
         keepPlace {
             var box = CGRect.null
             for line in lines {
                 for p in line.pages where p == page {
-                    let b = line.bounds(for: p).insetBy(dx: -1, dy: -1)
+                    let b = line.bounds(for: p)
                     box = box.union(b)
-                    let cover = PDFAnnotation(bounds: b, forType: .square, withProperties: nil)
+                    let cover = PDFAnnotation(bounds: b.insetBy(dx: -0.5, dy: -0.5), forType: .square, withProperties: nil)
                     cover.color = .white; cover.interiorColor = .white
                     let nb = PDFBorder(); nb.lineWidth = 0; cover.border = nb
                     add(cover, to: page)
                 }
             }
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty, !box.isNull {
-                let size = max(min(first.bounds(for: page).height * 0.8, 36), 6)
-                let font = UIFont.systemFont(ofSize: size)
-                let need = (t as NSString).boundingRect(with: CGSize(width: max(box.width, 40), height: 4000),
-                                                        options: .usesLineFragmentOrigin, attributes: [.font: font], context: nil).size
-                let r = CGRect(x: box.minX, y: box.maxY - need.height - 2, width: max(box.width, need.width) + 6, height: need.height + 4)
-                let a = PDFAnnotation(bounds: r, forType: .freeText, withProperties: nil)
-                a.contents = t; a.font = font; a.fontColor = color; a.color = .clear
-                let b = PDFBorder(); b.lineWidth = 0; a.border = b
-                add(a, to: page)
-            }
+            guard !t.isEmpty, !box.isNull else { view.clearSelection(); return }
+            let attrs: [NSAttributedString.Key: Any] = [.font: look.font]
+            let need = (t as NSString).size(withAttributes: attrs)
+            let numeric = old.range(of: #"^[\$€£(\-+]?\s*[\d.,]+\)?%?$"#, options: .regularExpression) != nil
+            // freeText draws its text a couple of points in from the box edge; pad by that so the words land where the old ones were
+            let pad: CGFloat = 2
+            let lineH = max(box.height, look.font.lineHeight)
+            let width = need.width + pad * 2 + 2
+            let x = numeric ? box.maxX + pad - width : box.minX - pad
+            let r = CGRect(x: x, y: box.maxY - lineH - pad, width: width, height: lineH + pad * 2)
+            let a = PDFAnnotation(bounds: r, forType: .freeText, withProperties: nil)
+            a.contents = t; a.font = look.font; a.fontColor = look.color; a.color = .clear
+            a.alignment = numeric ? .right : .left
+            let b = PDFBorder(); b.lineWidth = 0; a.border = b
+            add(a, to: page)
             view.clearSelection()
         }
+    }
+
+    /// The font, size and color of the first real character in a selection, as the PDF draws it.
+    static func look(of sel: PDFSelection, fallbackSize: CGFloat) -> (font: UIFont, color: UIColor) {
+        var font = UIFont.systemFont(ofSize: max(min(fallbackSize, 36), 6))
+        var color = UIColor.black
+        guard let a = sel.attributedString, a.length > 0 else { return (font, color) }
+        let str = a.string as NSString
+        var i = 0
+        while i < str.length - 1, let u = UnicodeScalar(str.character(at: i)), CharacterSet.whitespacesAndNewlines.contains(u) { i += 1 }
+        if let f = a.attribute(.font, at: i, effectiveRange: nil) as? UIFont { font = usable(f) }
+        if let c = a.attribute(.foregroundColor, at: i, effectiveRange: nil) as? UIColor { color = c }
+        return (font, color)
+    }
+
+    /// PDFs embed font subsets ("ABCDEF+Helvetica-Bold"); find the same face on the phone, or the closest one.
+    static func usable(_ f: UIFont) -> UIFont {
+        let size = f.pointSize
+        var name = f.fontName
+        if let plus = name.firstIndex(of: "+"), name.distance(from: name.startIndex, to: plus) == 6 { name = String(name[name.index(after: plus)...]) }
+        if let exact = UIFont(name: name, size: size) { return exact }
+        let lower = name.lowercased()
+        let bold = lower.contains("bold") || lower.contains("black") || lower.contains("heavy") || lower.contains("semibold")
+        let italic = lower.contains("italic") || lower.contains("oblique")
+        let family: String? =
+            lower.contains("helvetica") || lower.contains("arial") ? "Helvetica" :
+            lower.contains("times") || lower.contains("serif") && !lower.contains("sans") ? "Times New Roman" :
+            lower.contains("courier") || lower.contains("mono") ? "Courier New" :
+            lower.contains("georgia") ? "Georgia" : lower.contains("verdana") ? "Verdana" : nil
+        var traits: UIFontDescriptor.SymbolicTraits = []
+        if bold { traits.insert(.traitBold) }
+        if italic { traits.insert(.traitItalic) }
+        if let family {
+            let d = UIFontDescriptor(fontAttributes: [.family: family])
+            return UIFont(descriptor: d.withSymbolicTraits(traits) ?? d, size: size)
+        }
+        let sys = UIFont.systemFont(ofSize: size, weight: bold ? .bold : .regular)
+        return italic ? UIFont(descriptor: sys.fontDescriptor.withSymbolicTraits(traits) ?? sys.fontDescriptor, size: size) : sys
     }
 
     private func blackBox(_ r: CGRect, on page: PDFPage) {
