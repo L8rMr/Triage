@@ -124,7 +124,6 @@ struct ConnectView: View {
             if case .failed = link.phase, awayMacs.isEmpty, !cloud.status.isEmpty {
                 Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            }
         }
     }
 

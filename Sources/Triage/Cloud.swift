@@ -138,7 +138,8 @@ final class CloudPresence: ObservableObject {
         if let last = lastPunch, -last.timeIntervalSinceNow < 1 { return }
         lastPunch = Date()
         // fresh mapping first (the router may have moved us), then open the door toward the phone
-        let me = PortMap.shared.mapped ?? (await Stun.query(localPort: CloudIDs.quicPort))
+        var me = PortMap.shared.mapped
+        if me == nil { me = await Stun.query(localPort: CloudIDs.quicPort) }
         Punch.knock(from: CloudIDs.quicPort, to: ph, port: pp)
         rec["state"] = "ready"
         rec["macHost"] = me?.host ?? (rec["macHost"] as? String)
