@@ -65,7 +65,15 @@ final class AppTime: ObservableObject {
     var today: Day? { days.last { $0.date == Self.fmt.string(from: Date()) } }
     func top(_ day: Day?, _ n: Int = 5) -> [AppSpan] {
         guard let day else { return [] }
-        return day.seconds.sorted { $0.value > $1.value }.prefix(n).map { AppSpan(id: $0.key, name: day.names[$0.key] ?? $0.key, secs: $0.value) }
+        // the app was called VitalOS before; older days still carry that name (and its old bundle ID) — count it as Triage
+        var merged: [String: Double] = [:], names: [String: String] = [:]
+        for (id, secs) in day.seconds {
+            let old = (day.names[id] ?? id) == "VitalOS" || id.lowercased().hasSuffix(".vitalos")
+            let key = old ? "com.alenlvovich.triage" : id
+            merged[key, default: 0] += secs
+            names[key] = old ? "Triage" : (day.names[id] ?? id)
+        }
+        return merged.sorted { $0.value > $1.value }.prefix(n).map { AppSpan(id: $0.key, name: names[$0.key] ?? $0.key, secs: $0.value) }
     }
     /// Total front-of-screen time for each of the last 7 days, oldest first.
     var week: [DaySpan] {

@@ -80,7 +80,7 @@ extension RemoteAPI {
         let weekAgo = Date().addingTimeInterval(-7 * 86_400)
         let wk = samples.filter { $0.t >= weekAgo }
         var counts: [String: Int] = [:]
-        for s in wk { if let n = s.top { counts[n, default: 0] += 1 } }
+        for s in wk { if let n = s.top { counts[n == "VitalOS" ? "Triage" : n, default: 0] += 1 } }
         let total = Double(max(wk.count, 1))
         let hungry = counts.sorted { $0.value > $1.value }.prefix(6).map {
             ["name": $0.key, "share": Double($0.value) / total, "system": MacFacts.isSystem($0.key)] as [String: Any]

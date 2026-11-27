@@ -226,11 +226,11 @@ struct HomeScreen: View {
         tile("Hungriest this week", "flame.fill", tint: .amber) {
             let apps = g.hungry.filter { $0.system != true }
             if let first = apps.first {
-                Text(first.name).font(.title3.weight(.bold))
+                Text(first.name == "VitalOS" ? "Triage" : first.name).font(.title3.weight(.bold))
                 Text("busiest app \(Int(first.share * 100))% of the time").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(apps.dropFirst().prefix(3)) { a in
-                HStack { Text(a.name).font(.caption); Spacer(); Text("\(Int(a.share * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                HStack { Text(a.name == "VitalOS" ? "Triage" : a.name).font(.caption); Spacer(); Text("\(Int(a.share * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }
             if let sys = g.hungry.first(where: { $0.system == true }) {
                 Text("macOS itself (indexing, updates, backups) led \(Int(sys.share * 100))% of the time").font(.caption2).foregroundStyle(.secondary)
