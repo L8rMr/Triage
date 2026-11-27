@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 
 // MARK: - Themed segmented control (menu panel tabs, Settings pickers)
@@ -324,6 +325,7 @@ struct WorkbenchHome: View {
                     Text(heart.map { $0.stress >= 0.65 ? "Your Mac is \($0.status.lowercased()). \($0.diagnosis)" : "Your Mac is running easy. Nothing needs you right now." } ?? " ")
                         .font(.ui(size: 14)).foregroundStyle(.secondary).lineLimit(2)
                 }
+                tipLine
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], spacing: 14) {
                     card("HEART", value: "\(Int(monitor.bpm.rounded())) bpm", color: color,
@@ -345,35 +347,6 @@ struct WorkbenchHome: View {
                     card("MEMORY", value: Fmt.bytes(s.memUsed), color: s.memFraction > 0.85 ? Theme.warn : Theme.mem,
                          note: "of \(Fmt.bytes(s.memTotal)) · swap \(Fmt.bytes(s.swapUsed))", cta: "See apps") { model.route = .apps } extra: {
                         Sparkline(values: monitor.memHistory, maxValue: 100, color: Theme.mem).frame(height: 30)
-                    }
-                }
-
-                if let h = heart {
-                    let tips = Coach.suggestions(h, s, apps: monitor.apps)
-                    if !tips.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("SUGGESTED RIGHT NOW").font(.ui(size: 11, weight: .semibold)).kerning(0.8).foregroundStyle(.secondary)
-                            ForEach(tips.prefix(4)) { t in
-                                HStack(spacing: 14) {
-                                    Image(systemName: t.symbol).font(.system(size: 15)).foregroundStyle(color).frame(width: 28)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(t.title).font(.ui(size: 14, weight: .semibold))
-                                        Text(t.detail).font(.ui(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                                    }
-                                    Spacer()
-                                    if let label = t.actionLabel {
-                                        Button(label) { run(t.action) }.controlSize(.large)
-                                    }
-                                }
-                                .padding(12.d)
-                                .glass(14)
-                                .contextMenu {
-                                    if let label = t.actionLabel { Button(label) { run(t.action) } }
-                                    Button("Open Heart") { model.route = .heart }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: 900, alignment: .leading)
                     }
                 }
 
@@ -409,6 +382,59 @@ struct WorkbenchHome: View {
         .onAppear { pageSize = geo.size }
         .onChange(of: geo.size) { _, v in pageSize = v }
         }
+    }
+
+    // MARK: Suggestions: one calm line, never more
+
+    /// What the line shows. It only changes when the advice has actually changed AND the last change was at least
+    /// 30 s ago, so the page never twitches while you're reading it. The rest wait in a menu.
+    @State private var tips: [Suggestion] = []
+    @State private var tipsChangedAt = Date.distantPast
+    private let tipClock = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    private func refreshTips(force: Bool = false) {
+        guard let h = monitor.heart else { return }
+        let next = Array(Coach.suggestions(h, monitor.snap, apps: monitor.apps).prefix(6))
+        guard next.map(\.id) != tips.map(\.id) else { return }
+        guard force || Date().timeIntervalSince(tipsChangedAt) >= 30 else { return }
+        withAnimation(.easeInOut(duration: 0.35)) { tips = next }
+        tipsChangedAt = Date()
+    }
+
+    private var tipLine: some View {
+        HStack(spacing: 10) {
+            if let t = tips.first {
+                Image(systemName: t.symbol).font(.system(size: 13)).foregroundStyle(Theme.accent).frame(width: 18)
+                Text(t.title).font(.ui(size: 13, weight: .semibold)).lineLimit(1)
+                Text(t.detail).font(.ui(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 8)
+                if let label = t.actionLabel { Button(label) { run(t.action) }.controlSize(.small) }
+                if tips.count > 1 {
+                    Menu("+\(tips.count - 1) more") {
+                        ForEach(tips.dropFirst()) { o in
+                            if let label = o.actionLabel {
+                                Button { run(o.action) } label: { Label("\(o.title) · \(label)", systemImage: o.symbol) }
+                            } else {
+                                Button { model.route = .heart } label: { Label(o.title, systemImage: o.symbol) }
+                            }
+                        }
+                        Divider()
+                        Button("Open Heart") { model.route = .heart }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().font(.ui(size: 12))
+                }
+            } else {
+                Image(systemName: "checkmark.circle").font(.system(size: 13)).foregroundStyle(Theme.good).frame(width: 18)
+                Text("Nothing to fix right now").font(.ui(size: 13)).foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12).frame(height: 36)          // same height whatever it says: nothing below moves
+        .frame(maxWidth: 900, alignment: .leading)
+        .glass(10)
+        .contentTransition(.opacity)
+        .onAppear { refreshTips(force: true) }
+        .onReceive(tipClock) { _ in refreshTips() }
     }
 
     // Jump To fills the page down to ~85% of its height; the last 15% stays empty.
