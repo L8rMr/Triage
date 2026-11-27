@@ -709,7 +709,7 @@ enum RemoteAPI {
                 RemoteServer.shared.record(s.deviceName, "Emptied the Trash")
                 done(.success([:]))
             default:
-                if !desktop(op, a, s, done) && !more(op, a, s, done) { done(.failure(RemoteError(message: "Unknown request \(op)"))) }
+                if !desktop(op, a, s, done) && !more(op, a, s, done) && !tools(op, a, s, done) { done(.failure(RemoteError(message: "Unknown request \(op)"))) }
             }
         }
     }

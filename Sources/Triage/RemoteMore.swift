@@ -7,11 +7,11 @@ import UniformTypeIdentifiers
 
 extension RemoteAPI {
     /// Requests that change something on the Mac. View-only phones get a polite no.
-    static let writeOps: Set<String> = ["quitApp", "trash", "emptyTrash", "clean", "open", "reveal", "sleepDisplay", "sleepMac",
-                                        "rename", "mkdir", "move", "copy", "upload", "setClipboard"]
+    static let writeOps: Set<String> = Set(["quitApp", "trash", "emptyTrash", "clean", "open", "reveal", "sleepDisplay", "sleepMac",
+                                        "rename", "mkdir", "move", "copy", "upload", "setClipboard"]).union(toolWriteOps)
 
     static let allOps = ["vitals", "info", "apps", "list", "search", "keepAwake", "glance", "space", "clips", "thumb", "fetch",
-                         "favorites", "setTheme"]
+                         "favorites", "setTheme"] + toolReadOps
 
     /// Handled here: returns false when the op isn't one of ours.
     static func more(_ op: String, _ a: [String: Any], _ s: RemoteSession, _ done: @escaping Done) -> Bool {
