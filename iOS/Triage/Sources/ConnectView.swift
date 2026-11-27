@@ -31,6 +31,10 @@ struct ConnectView: View {
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }
+        .safeAreaInset(edge: .bottom) {
+            Text("Triage \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")")
+                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary).padding(.bottom, 4)
+        }
         .scrollDismissesKeyboard(.interactively)
         .animation(.snappy, value: link.phase)
     }
@@ -107,8 +111,11 @@ struct ConnectView: View {
             }
             if browser.macs.isEmpty && awayMacs.isEmpty {
                 ProgressView().padding(.top, 8)
-                if !cloud.status.isEmpty {
-                    Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(cloud.status.isEmpty ? (PathWatch.shared.onWiFi ? "Looking on this Wi-Fi and asking iCloud where your Mac is…" : "Asking iCloud where your Mac is…") : cloud.status)
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                if !PathWatch.shared.onWiFi {
+                    Text("On cellular? Check Settings › Cellular › Triage is switched on.")
+                        .font(.caption2).foregroundStyle(.tertiary).multilineTextAlignment(.center)
                 }
             }
             if !link.notes.isEmpty { notesCard.padding(.top, 10) }
