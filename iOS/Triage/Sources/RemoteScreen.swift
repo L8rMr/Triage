@@ -27,6 +27,7 @@ final class RemoteFrames: ObservableObject {
     private let lock = NSLock()
     private var format: CMVideoFormatDescription?
     private var waitingForKey = true
+    private var lastAsk = Date.distantPast
 
     func receive(_ data: Data) {
         if data.first == 0x56 { q.async { self.video(data) }; return }
@@ -59,7 +60,11 @@ final class RemoteFrames: ObservableObject {
             }
             waitingForKey = false
         }
-        guard !waitingForKey, let format else { return }
+        guard !waitingForKey, let format else {
+            // the first picture got lost on the way: ask again (twice a second at most) instead of staying blank
+            if Date().timeIntervalSince(lastAsk) > 0.5 { lastAsk = Date(); needKeyframe() }
+            return
+        }
         let body = d.subdata(in: i..<d.endIndex)
         guard let sb = Self.makeSample(body, format: format) else { return }
         let r = layer.sampleBufferRenderer
@@ -572,7 +577,9 @@ struct RemoteScreen: View {
         error = nil
         starting = true
         frames.reset()
-        let p = RemotePrefs.stream
+        var p = RemotePrefs.stream
+        // Away from home the path is thinner and longer: a lighter stream stays smooth instead of stalling.
+        if link.viaInternet { p = (30, min(p.quality, 0.45), min(p.maxWidth, 1600), min(p.bitrate, 2_500_000)) }
         frames.needKeyframe = { [link] in link.send("keyframe", [:]) }
         var args: [String: Any] = ["fps": p.fps, "quality": p.quality, "maxWidth": p.maxWidth, "codec": "hevc", "bitrate": p.bitrate]
         if let display { args["display"] = display }

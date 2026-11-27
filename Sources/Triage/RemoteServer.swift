@@ -427,6 +427,8 @@ final class RemoteSession {
     var subscribed = false
     var clipSync = false
     private var framesInFlight = 0
+    private var sentAt: [Date] = []         // when each in-flight frame left; a slot frees itself after a second regardless
+    private var needKey = false             // a video frame was dropped: everything until the next keyframe is useless
 
     private let eph = P256.KeyAgreement.PrivateKey()
     private var clientPub: P256.KeyAgreement.PublicKey?
@@ -512,12 +514,28 @@ final class RemoteSession {
     /// Returns false when the frame was dropped (link busy): video then needs a fresh keyframe.
     @discardableResult
     func pushBinary(_ payload: Data) -> Bool {       // on queue
-        let limit = payload.first == 0x56 ? 5 : 2       // video frames are small; JPEGs aren't
-        guard let key, !closed, framesInFlight < limit, let box = try? ChaChaPoly.seal(payload, using: key) else { return false }
+        guard let key, !closed else { return false }
+        let video = payload.first == 0x56
+        let isKey = video && payload.count > 2 && payload[payload.startIndex + 2] == 1
+        // Slots normally free when the send completes; on a slow internet path that can lag, so they also age out.
+        let now = Date()
+        sentAt.removeAll { now.timeIntervalSince($0) > 1.0 }
+        framesInFlight = min(framesInFlight, sentAt.count)
+        if video && needKey && !isKey { return true }            // waiting for a keyframe: don't spend the link on frames that can't show
+        let limit = video ? (isKey ? 8 : 4) : 2                  // a keyframe always gets through a busy moment
+        guard framesInFlight < limit, let box = try? ChaChaPoly.seal(payload, using: key) else {
+            if video { needKey = true }
+            return false
+        }
+        if isKey { needKey = false }
         framesInFlight += 1
+        sentAt.append(now)
         conn.send(content: box.combined, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] _ in
             guard let self else { return }
-            self.server.queue.async { self.framesInFlight = max(0, self.framesInFlight - 1) }
+            self.server.queue.async {
+                self.framesInFlight = max(0, self.framesInFlight - 1)
+                if !self.sentAt.isEmpty { self.sentAt.removeFirst() }
+            }
         })
         return true
     }
