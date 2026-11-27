@@ -62,6 +62,14 @@ final class CloudDirectory: ObservableObject {
             if !ids.isEmpty, let got = try? await db.records(for: ids) {
                 for (_, r) in got { if case .success(let rec) = r { records.append(rec) } }
             }
+            // And ask for every Mac record outright (works even when the zone's change feed comes back empty).
+            if !records.contains(where: { $0.recordType == "TriageMac" }) {
+                do {
+                    let q = CKQuery(recordType: "TriageMac", predicate: NSPredicate(value: true))
+                    let res = try await db.records(matching: q, inZoneWith: CloudIDs.zone, resultsLimit: 20)
+                    for (_, r) in res.matchResults { if case .success(let rec) = r { records.append(rec) } }
+                } catch { notes.append(error.localizedDescription) }
+            }
             var found: [CloudMac] = []
             for r in records {
                 guard r.recordType == "TriageMac", let id = r["macID"] as? String, let secret = r["secret"] as? Data else { continue }
