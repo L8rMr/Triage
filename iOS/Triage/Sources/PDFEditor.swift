@@ -105,8 +105,10 @@ final class ImageStamp: PDFAnnotation {
 @MainActor
 final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvider {
     let view = PDFView()
-    let picker = PKToolPicker()
     @Published var mode: PDFMode = .view
+    @Published var ink: InkKind = .pen { didSet { applyInk() } }
+    @Published var inkColor: UIColor = .systemBlue { didSet { applyInk() } }
+    @Published var inkWidth: CGFloat = 3 { didSet { applyInk() } }
     @Published var dirty = false
     @Published var hasSelection = false
     @Published var pageLabel = ""
@@ -119,6 +121,40 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
     private var boxAnn: PDFAnnotation?
 
     enum Placeable { case text(String, UIColor), image(UIImage, CGFloat) }
+    enum InkKind: String, CaseIterable { case pen, marker, eraser }
+
+    private var inkTool: PKTool {
+        switch ink {
+        case .pen: return PKInkingTool(.pen, color: inkColor, width: inkWidth)
+        case .marker: return PKInkingTool(.marker, color: inkColor, width: inkWidth * 5)
+        case .eraser: return PKEraserTool(.vector)
+        }
+    }
+    private func applyInk() { for c in canvases.values { c.tool = inkTool } }
+
+    /// PDFView's own scroll view (to keep the place while annotations change, and to scroll with two fingers while drawing).
+    private lazy var scroller: UIScrollView? = {
+        func find(_ v: UIView) -> UIScrollView? {
+            if let s = v as? UIScrollView { return s }
+            for sub in v.subviews { if let s = find(sub) { return s } }
+            return nil
+        }
+        return find(view)
+    }()
+
+    /// Do something to the document without the view jumping somewhere else.
+    func keepPlace(_ body: () -> Void) {
+        let sv = scroller, off = sv?.contentOffset, scale = view.scaleFactor
+        body()
+        let restore: @MainActor () -> Void = { [weak self] in
+            guard let self, let sv, let off else { return }
+            if abs(self.view.scaleFactor - scale) > 0.0001 { self.view.scaleFactor = scale }
+            if sv.contentOffset != off { sv.setContentOffset(off, animated: false) }
+        }
+        restore()
+        DispatchQueue.main.async { restore() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { restore() }
+    }
 
     init(doc: PDFDocument) {
         super.init()
@@ -130,7 +166,6 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
         view.backgroundColor = .clear
         view.pageShadowsEnabled = true
         view.isFindInteractionEnabled = true
-        picker.selectedToolItemIdentifier = "com.apple.ink.pen"
         NotificationCenter.default.addObserver(self, selector: #selector(selectionChanged), name: .PDFViewSelectionChanged, object: view)
         NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .PDFViewPageChanged, object: view)
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
@@ -144,10 +179,14 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
 
     var doc: PDFDocument { view.document ?? PDFDocument() }
 
-    @objc private func selectionChanged() { hasSelection = !(view.currentSelection?.string ?? "").isEmpty }
+    @objc private func selectionChanged() {
+        let has = !(view.currentSelection?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if has != hasSelection { hasSelection = has }
+    }
     @objc private func pageChanged() {
         guard let p = view.currentPage else { return }
-        pageLabel = "\(doc.index(for: p) + 1) of \(doc.pageCount)"
+        let l = "\(doc.index(for: p) + 1) of \(doc.pageCount)"
+        if l != pageLabel { pageLabel = l }
     }
 
     // MARK: Drawing (PencilKit on top of each page)
@@ -158,7 +197,7 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
             c.backgroundColor = .clear
             c.isOpaque = false
             c.drawingPolicy = .anyInput
-            picker.addObserver(c)
+            c.tool = inkTool
             canvases[page] = c
             return c
         }()
@@ -170,17 +209,15 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
         if mode == .draw && m != .draw { commitDrawings() }
         mode = m
         view.isInMarkupMode = m == .draw
-        for c in canvases.values { c.isUserInteractionEnabled = m == .draw }
-        if m == .draw, let p = view.currentPage, let c = canvases[p] {
-            picker.setVisible(true, forFirstResponder: c)
-            c.becomeFirstResponder()
-        } else {
-            for c in canvases.values { picker.setVisible(false, forFirstResponder: c); c.resignFirstResponder() }
-        }
+        for c in canvases.values { c.isUserInteractionEnabled = m == .draw; c.tool = inkTool }
+        // One finger draws, two fingers scroll and zoom.
+        scroller?.panGestureRecognizer.minimumNumberOfTouches = m == .draw ? 2 : 1
+        if m != .view { view.clearSelection() }
     }
 
     /// Strokes become real ink annotations (they open in Preview and Acrobat as markup).
-    private func commitDrawings() {
+    private func commitDrawings() { keepPlace { commitDrawingsNow() } }
+    private func commitDrawingsNow() {
         let s = max(view.scaleFactor, 0.01)
         for (page, c) in canvases where !c.drawing.strokes.isEmpty {
             for stroke in c.drawing.strokes {
@@ -211,6 +248,7 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
 
     func markSelection(_ type: PDFAnnotationSubtype) {
         guard let sel = view.currentSelection else { return }
+        keepPlace {
         for line in sel.selectionsByLine() {
             for page in line.pages {
                 let b = line.bounds(for: page)
@@ -220,14 +258,52 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
             }
         }
         view.clearSelection()
+        }
     }
 
     func redactSelection() {
         guard let sel = view.currentSelection else { return }
-        for line in sel.selectionsByLine() {
-            for page in line.pages { blackBox(line.bounds(for: page).insetBy(dx: -1, dy: -1), on: page) }
+        keepPlace {
+            for line in sel.selectionsByLine() {
+                for page in line.pages { blackBox(line.bounds(for: page).insetBy(dx: -1, dy: -1), on: page) }
+            }
+            view.clearSelection()
         }
-        view.clearSelection()
+    }
+
+    var selectedText: String { view.currentSelection?.string ?? "" }
+
+    /// "Edit" words: paper-colored cover over the selected lines, new words typed on top in a matching size.
+    func replaceSelection(with text: String, color: UIColor = .black) {
+        guard let sel = view.currentSelection else { return }
+        let lines = sel.selectionsByLine()
+        guard let first = lines.first, let page = first.pages.first else { return }
+        keepPlace {
+            var box = CGRect.null
+            for line in lines {
+                for p in line.pages where p == page {
+                    let b = line.bounds(for: p).insetBy(dx: -1, dy: -1)
+                    box = box.union(b)
+                    let cover = PDFAnnotation(bounds: b, forType: .square, withProperties: nil)
+                    cover.color = .white; cover.interiorColor = .white
+                    let nb = PDFBorder(); nb.lineWidth = 0; cover.border = nb
+                    add(cover, to: page)
+                }
+            }
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty, !box.isNull {
+                let size = max(min(first.bounds(for: page).height * 0.8, 36), 6)
+                let font = UIFont.systemFont(ofSize: size)
+                let need = (t as NSString).boundingRect(with: CGSize(width: max(box.width, 40), height: 4000),
+                                                        options: .usesLineFragmentOrigin, attributes: [.font: font], context: nil).size
+                let r = CGRect(x: box.minX, y: box.maxY - need.height - 2, width: max(box.width, need.width) + 6, height: need.height + 4)
+                let a = PDFAnnotation(bounds: r, forType: .freeText, withProperties: nil)
+                a.contents = t; a.font = font; a.fontColor = color; a.color = .clear
+                let b = PDFBorder(); b.lineWidth = 0; a.border = b
+                add(a, to: page)
+            }
+            view.clearSelection()
+        }
     }
 
     private func blackBox(_ r: CGRect, on page: PDFPage) {
@@ -248,6 +324,7 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
         switch mode {
         case .place:
             guard let what = placing else { return }
+            keepPlace {
             switch what {
             case .text(let s, let color):
                 let font = UIFont.systemFont(ofSize: 14)
@@ -265,16 +342,17 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
                 let h = width * img.size.height / max(img.size.width, 1)
                 add(ImageStamp(image: img, bounds: CGRect(x: pt.x - width / 2, y: pt.y - h / 2, width: width, height: h)), to: page)
             }
+            }
             placing = nil
             setMode(.view)
         case .erase:
-            if let a = page.annotation(at: pt), a.type != "Widget" {
+            if let a = page.annotation(at: pt), a.type != "Widget" { keepPlace {
                 if (a.value(forAnnotationKey: .name) as? String) == "triage-redact" { redacted.remove(page) }
                 page.removeAnnotation(a)
                 added.removeAll { $0.0 === a }
                 canUndo = !added.isEmpty
                 dirty = true
-            }
+            } }
         default: break
         }
     }
@@ -308,13 +386,13 @@ final class PDFEditorModel: NSObject, ObservableObject, PDFPageOverlayViewProvid
     private func add(_ a: PDFAnnotation, to page: PDFPage) {
         page.addAnnotation(a)
         added.append((a, page))
-        canUndo = true
-        dirty = true
+        if !canUndo { canUndo = true }
+        if !dirty { dirty = true }
     }
 
     func undo() {
         guard let (a, page) = added.popLast() else { return }
-        page.removeAnnotation(a)
+        keepPlace { page.removeAnnotation(a) }
         if (a.value(forAnnotationKey: .name) as? String) == "triage-redact",
            !page.annotations.contains(where: { ($0.value(forAnnotationKey: .name) as? String) == "triage-redact" }) { redacted.remove(page) }
         canUndo = !added.isEmpty
@@ -387,6 +465,7 @@ struct PDFEditView: View {
     @State private var error: String?
     @State private var toast: String?
     @State private var confirmLeave = false
+    @State private var editingWords = false
 
     init(source: PDFSource) {
         self.source = source
@@ -405,7 +484,6 @@ struct PDFEditView: View {
 
     var body: some View {
         PDFKitView(model: m)
-            .ignoresSafeArea(edges: .bottom)
             .background(Color.glass900)
             .overlay(alignment: .top) {
                 if let hint {
@@ -413,7 +491,10 @@ struct PDFEditView: View {
                         .background(.ultraThinMaterial, in: Capsule()).padding(.top, 8)
                 }
             }
-            .overlay(alignment: .bottom) { if m.hasSelection && m.mode == .view { selectionBar } }
+            .overlay(alignment: .bottom) {
+                if m.mode == .draw { inkBar }
+                else if m.hasSelection && m.mode == .view { selectionBar }
+            }
             .overlay {
                 if let saving {
                     VStack(spacing: 10) { ProgressView(); Text(saving).font(.footnote.weight(.semibold)) }
@@ -422,7 +503,7 @@ struct PDFEditView: View {
             }
             .navigationTitle(source.local.lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(m.dirty)
+            .navigationBarBackButtonHidden(true)
             .toolbar { top; bottom }
             .alert("Add text", isPresented: $askText) {
                 TextField("Text", text: $text)
@@ -431,6 +512,11 @@ struct PDFEditView: View {
                 Button("Red") { place(.systemRed) }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Pick a color, then tap where it goes.") }
+            .alert("Change these words", isPresented: $editingWords) {
+                TextField("New words", text: $text)
+                Button("Replace") { m.replaceSelection(with: text) }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Covers the selected words and types yours in their place. Leave empty to just white them out.") }
             .sheet(isPresented: $signing) { SignatureSheet { img in m.place(.image(img, 150)) } }
             .sheet(isPresented: $showPages) { PagesSheet(model: m) }
             .sheet(item: Binding(get: { share.map { ShareItem(url: $0) } }, set: { share = $0?.url })) { s in ShareSheet(items: [s.url]) }
@@ -452,8 +538,8 @@ struct PDFEditView: View {
     }
 
     @ToolbarContentBuilder private var top: some ToolbarContent {
-        if m.dirty {
-            ToolbarItem(placement: .cancellationAction) { Button("Close") { confirmLeave = true } }
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Close") { if m.dirty { confirmLeave = true } else { dismiss() } }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { m.undo() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(!m.canUndo)
@@ -498,8 +584,38 @@ struct PDFEditView: View {
         }
     }
 
+    private var inkBar: some View {
+        HStack(spacing: 14) {
+            ForEach(PDFEditorModel.InkKind.allCases, id: \.self) { k in
+                Button { m.ink = k } label: {
+                    Image(systemName: k == .pen ? "pencil.tip" : k == .marker ? "highlighter" : "eraser")
+                        .frame(width: 34, height: 34)
+                        .background(m.ink == k ? Color.phosphor.opacity(0.3) : .clear, in: Circle())
+                }
+            }
+            Divider().frame(height: 24)
+            ForEach([UIColor.black, .systemBlue, .systemRed, .systemYellow, .systemGreen], id: \.self) { c in
+                Button { m.inkColor = c; if m.ink == .eraser { m.ink = .pen } } label: {
+                    Circle().fill(Color(c)).frame(width: 22, height: 22)
+                        .overlay(Circle().stroke(Color.primary, lineWidth: m.inkColor == c && m.ink != .eraser ? 2.5 : 0).padding(-4))
+                }
+            }
+            Divider().frame(height: 24)
+            Button { m.inkWidth = m.inkWidth >= 8 ? 2 : m.inkWidth * 2 } label: {
+                Circle().frame(width: 4 + m.inkWidth * 1.6, height: 4 + m.inkWidth * 1.6).frame(width: 26, height: 26)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.bottom, 12)
+        .overlay(alignment: .top) {
+            Text("One finger draws · two fingers scroll").font(.caption2).foregroundStyle(.secondary).offset(y: -18)
+        }
+    }
+
     private var selectionBar: some View {
         HStack(spacing: 18) {
+            Button { text = m.selectedText; editingWords = true } label: { Label("Change words", systemImage: "character.cursor.ibeam") }
             Button { m.markSelection(.highlight) } label: { Label("Highlight", systemImage: "highlighter") }
             Button { m.markSelection(.underline) } label: { Label("Underline", systemImage: "underline") }
             Button { m.markSelection(.strikeOut) } label: { Label("Strike", systemImage: "strikethrough") }
