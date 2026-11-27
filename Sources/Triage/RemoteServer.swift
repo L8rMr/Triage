@@ -299,6 +299,7 @@ final class RemoteServer: ObservableObject {
                 if self.sessions[id]?.pushBinary(frame) == false && frame.first == 0x56 { ScreenShare.shared.requestKeyframe() }
             }
         }
+        DispatchQueue.main.async { self.followPointer(id) }
         DispatchQueue.main.async {
             if self.watchingSession != id { self.record(s.deviceName, "Started remote desktop") }
             self.watchingSession = id
@@ -306,9 +307,29 @@ final class RemoteServer: ObservableObject {
         }
     }
 
+    private var pointerTimer: Timer?
+    private var lastPointer = CGPoint(x: -1, y: -1)
+
+    /// While the phone watches, tell it where the pointer is (on the shown screen, 0…1), so a zoomed-in phone can
+    /// follow it like a strategy game's camera. Only when it moves; at most 30 times a second.
+    private func followPointer(_ id: UUID) {
+        pointerTimer?.invalidate()
+        pointerTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let p = CGEvent(source: nil)?.location ?? .zero
+            guard p != self.lastPointer else { return }
+            self.lastPointer = p
+            let d = CGDisplayBounds(ScreenShare.shared.displayID)
+            guard d.width > 0, d.contains(p) else { return }
+            let x = (p.x - d.minX) / d.width, y = (p.y - d.minY) / d.height
+            self.queue.async { self.sessions[id]?.push("cursor", ["x": x, "y": y]) }
+        }
+    }
+
     func stopWatching(_ s: RemoteSession) {
         DispatchQueue.main.async {
             guard self.watchingSession == s.id else { return }
+            self.pointerTimer?.invalidate(); self.pointerTimer = nil
             ScreenShare.shared.onFrame = nil
             ScreenShare.shared.stop()
             self.holdDisplay(false)
@@ -321,6 +342,7 @@ final class RemoteServer: ObservableObject {
     /// The person at the Mac pulled the plug on the phone's remote session.
     func endDesktop() {
         guard let id = watchingSession else { return }
+        pointerTimer?.invalidate(); pointerTimer = nil
         ScreenShare.shared.onFrame = nil
         ScreenShare.shared.stop()
         holdDisplay(false)

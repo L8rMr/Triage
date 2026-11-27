@@ -13,6 +13,8 @@ final class RemoteFrames: ObservableObject {
     @Published private(set) var videoSize: CGSize?
     @Published var note: String?
     @Published var ended = false
+    /// Where the Mac's pointer is on the shown screen (0…1), sent while streaming.
+    @Published var cursor: CGPoint?
     /// Fires when the decoder lost its place and needs a fresh full picture from the Mac.
     var needKeyframe: () -> Void = {}
 
@@ -313,6 +315,32 @@ struct RemoteScreen: View {
                                  displaySwipe: { step in nextDisplay(step) })
             }
             .clipped()
+            // Zoomed in? The view follows the pointer: nudge it toward an edge and the picture scrolls to keep it
+            // in sight, like a strategy game's camera.
+            .onChange(of: frames.cursor) { _, c in
+                guard let c, zoom > 1.01, edgePan else { return }
+                follow(c, fitted: fitted, box: g.size)
+            }
+        }
+    }
+
+    @AppStorage("remote.edgePan") private var edgePan = true
+
+    private func follow(_ c: CGPoint, fitted: CGRect, box: CGSize) {
+        let mid = CGPoint(x: box.width / 2, y: box.height / 2)
+        // where the pointer is on the phone right now
+        let p = CGPoint(x: fitted.minX + c.x * fitted.width, y: fitted.minY + c.y * fitted.height)
+        let v = CGPoint(x: (p.x - mid.x) * zoom + mid.x + pan.width, y: (p.y - mid.y) * zoom + mid.y + pan.height)
+        let mx = box.width * 0.18, my = box.height * 0.18          // the edge band that starts the scroll
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        if v.x < mx { dx = mx - v.x } else if v.x > box.width - mx { dx = (box.width - mx) - v.x }
+        if v.y < my { dy = my - v.y } else if v.y > box.height - my { dy = (box.height - my) - v.y }
+        guard dx != 0 || dy != 0 else { return }
+        // never scroll past the picture's edges
+        let limX = max(0, (fitted.width * zoom - box.width) / 2 + abs(mid.x - fitted.midX) * zoom)
+        let limY = max(0, (fitted.height * zoom - box.height) / 2 + abs(mid.y - fitted.midY) * zoom)
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+            pan = CGSize(width: min(max(pan.width + dx, -limX), limX), height: min(max(pan.height + dy, -limY), limY))
         }
     }
 

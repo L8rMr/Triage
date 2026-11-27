@@ -556,6 +556,10 @@ final class MacLink: ObservableObject {
                     RemoteFrames.shared.flash("Copied from \(self.macName)")
                 }
             }
+        case "cursor":
+            if let b = o["body"] as? [String: Any], let x = b["x"] as? Double, let y = b["y"] as? Double {
+                DispatchQueue.main.async { RemoteFrames.shared.cursor = CGPoint(x: x, y: y) }
+            }
         case "desktopEnded":
             DispatchQueue.main.async { RemoteFrames.shared.ended = true }
         case "bye":
