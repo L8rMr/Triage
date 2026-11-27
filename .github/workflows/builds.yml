@@ -30,7 +30,25 @@ jobs:
               print(a["version"], a["uploadedDate"], "processing:", a["processingState"], "expired:", a["expired"],
                     "encryption:", a.get("usesNonExemptEncryption"), "internal:", det.get(bd, {}).get("internalBuildState"),
                     "external:", det.get(bd, {}).get("externalBuildState"))
-          g = requests.get(f"https://api.appstoreconnect.apple.com/v1/apps/{app}/betaGroups", headers=h).json()
-          for x in g["data"]:
-              print("group:", x["attributes"]["name"], "internal:", x["attributes"]["isInternalGroup"], "allBuilds:", x["attributes"].get("hasAccessToAllBuilds"))
+          api = "https://api.appstoreconnect.apple.com/v1"
+          g = requests.get(f"{api}/apps/{app}/betaGroups", headers=h).json()
+          print("groups:", json.dumps(g)[:600])
+          group = next((x for x in g.get("data", []) if x["attributes"]["isInternalGroup"]), None)
+          if group is None:
+              r = requests.post(f"{api}/betaGroups", headers=h, json={"data": {"type": "betaGroups",
+                  "attributes": {"name": "Me", "isInternalGroup": True, "hasAccessToAllBuilds": True},
+                  "relationships": {"app": {"data": {"type": "apps", "id": app}}}}})
+              print("create group:", r.status_code, r.text[:400])
+              group = r.json().get("data")
+          gid = group["id"]
+          users = requests.get(f"{api}/users?limit=50", headers=h).json()
+          print("users:", users.get("errors") or [(u["attributes"]["username"], u["attributes"]["roles"]) for u in users.get("data", [])])
+          for u in users.get("data", []):
+              email = u["attributes"]["username"]
+              r = requests.post(f"{api}/betaTesters", headers=h, json={"data": {"type": "betaTesters",
+                  "attributes": {"email": email, "firstName": u["attributes"].get("firstName", ""), "lastName": u["attributes"].get("lastName", "")},
+                  "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})
+              print("add tester", email, r.status_code, r.text[:300])
+          t = requests.get(f"{api}/betaGroups/{gid}/betaTesters", headers=h).json()
+          print("testers now:", [x["attributes"].get("email") for x in t.get("data", [])])
           PY
