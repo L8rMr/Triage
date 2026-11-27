@@ -261,10 +261,13 @@ final class MacLink: ObservableObject {
             params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
         }
         params.serviceClass = .interactiveVideo
+        // Straight to the Mac: never through iCloud Private Relay or another proxy. Relays open the connection but
+        // stall the conversation, and the link is end-to-end encrypted anyway.
+        params.preferNoProxies = true
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
         if !plan.isEmpty {
-            q.asyncAfter(deadline: .now() + (target.quic ? 6 : 3.5)) { [weak self] in
+            q.asyncAfter(deadline: .now() + (target.quic || label != "Wi-Fi" ? 7 : 3.5)) { [weak self] in
                 guard let self, self.gen == g, !self.heard else { return }
                 self.fellThrough("Timed out")
             }

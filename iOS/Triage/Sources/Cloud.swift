@@ -150,6 +150,7 @@ enum Stun {
         await withCheckedContinuation { cont in
             let params = NWParameters.udp
             params.allowLocalEndpointReuse = true
+            params.preferNoProxies = true
             // Ask over IPv4 on purpose (the Mac's address is IPv4): on IPv6-only carriers the phone still gets the
             // carrier's IPv4 mapping this way, through NAT64.
             let target: NWEndpoint.Host = ipv4(host).map { .ipv4($0) } ?? NWEndpoint.Host(host)
