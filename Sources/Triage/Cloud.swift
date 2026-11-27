@@ -166,7 +166,12 @@ final class CloudPresence: ObservableObject {
             let l = try NWListener(using: params, on: NWEndpoint.Port(rawValue: CloudIDs.quicPort)!)
             l.newConnectionHandler = { c in RemoteServer.shared.acceptFramed(c) }
             l.stateUpdateHandler = { [weak self] st in
-                if case .failed(let e) = st { self?.setStatus("Internet door closed: \(e.localizedDescription)"); self?.quic = nil }
+                switch st {
+                case .ready: RemoteServer.shared.record("Internet", "QUIC door listening on UDP \(CloudIDs.quicPort)")
+                case .failed(let e): self?.setStatus("Internet door closed: \(e.localizedDescription)"); self?.quic = nil
+                    RemoteServer.shared.record("Internet", "QUIC door failed: \(e.localizedDescription)")
+                default: break
+                }
             }
             l.start(queue: RemoteServer.shared.queue)
             quic = l
@@ -294,14 +299,19 @@ final class PortMap {
         self.onChange = onChange
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         let err = DNSServiceNATPortMappingCreate(&ref, 0, 0, DNSServiceProtocol(kDNSServiceProtocol_UDP),
-                                                 port.bigEndian, port.bigEndian, 7200, { _, _, _, err, addr, _, _, ext, _, ctx in
+                                                 port.bigEndian, port.bigEndian, 7200, { _, _, _, err, addr, _, intPort, ext, _, ctx in
             guard let ctx else { return }
             let me = Unmanaged<PortMap>.fromOpaque(ctx).takeUnretainedValue()
             let extPort = Int(UInt16(bigEndian: ext))
-            guard err == kDNSServiceErr_NoError, addr != 0, extPort != 0 else { me.mapped = nil; return }
+            guard err == kDNSServiceErr_NoError, addr != 0, extPort != 0 else {
+                me.mapped = nil
+                RemoteServer.shared.record("Internet", "Router port forwarding unavailable (error \(err), port \(extPort))")
+                return
+            }
             let b = withUnsafeBytes(of: addr) { Array($0) }          // network order: first byte is the first octet
             let host = b.map { String($0) }.joined(separator: ".")
             me.mapped = (host, extPort)
+            RemoteServer.shared.record("Internet", "Router forwards \(host):\(extPort) → this Mac's UDP \(UInt16(bigEndian: intPort))")
             me.onChange?((host, extPort))
         }, ctx)
         guard err == kDNSServiceErr_NoError, let ref else { self.ref = nil; return }

@@ -454,9 +454,16 @@ final class RemoteSession {
     }
 
     func start() {
+        let framed = self.framed, peer = "\(conn.endpoint)"
+        if framed { server.record("Internet", "Connection attempt from \(peer)") }
         conn.stateUpdateHandler = { [weak self] st in
             switch st {
-            case .failed, .cancelled: self?.close()
+            case .ready: if framed { self?.server.record("Internet", "Secure link up with \(peer)") }
+            case .failed(let e):
+                if framed { self?.server.record("Internet", "Link from \(peer) failed: \(e.localizedDescription)") }
+                self?.close()
+            case .waiting(let e): if framed { self?.server.record("Internet", "Link from \(peer) waiting: \(e.localizedDescription)") }
+            case .cancelled: self?.close()
             default: break
             }
         }
