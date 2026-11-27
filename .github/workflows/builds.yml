@@ -1,5 +1,8 @@
 name: TestFlight build status
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/builds.yml', '.github/check-builds']
 jobs:
   status:
     runs-on: ubuntu-latest
