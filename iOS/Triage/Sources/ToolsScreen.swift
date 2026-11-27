@@ -11,11 +11,31 @@ struct ToolsScreen: View {
 
     var body: some View {
         List {
-            Section {
-                NavigationLink { HeartScreen() } label: { Label("Heart monitor", systemImage: "waveform.path.ecg") }
-                NavigationLink { AppsScreen() } label: { Label("Apps", systemImage: "square.stack.3d.up.fill") }
-                NavigationLink { SpaceScreen() } label: { Label("Free Up Space", systemImage: "sparkles") }
-                NavigationLink { ClipsScreen() } label: { Label("Clipboard", systemImage: "doc.on.clipboard") }
+            Section("Everyday") {
+                tool("PDF Editor", "doc.richtext", "Mark up, sign, redact, fill and rearrange") { PDFEditorScreen() }
+                tool("Converter", "arrow.triangle.2.circlepath", "Images, PDFs, documents, audio, video, data") { ConverterScreen() }
+                tool("Batch Rename", "character.cursor.ibeam", "Patterns, numbering, find and replace") { RenameScreen() }
+                tool("Clipboard", "doc.on.clipboard", "The Mac's clipboard history") { ClipsScreen() }
+                tool("Tidy Downloads", "tray.and.arrow.down", "Sort loose downloads into folders") { TidyScreen() }
+                tool("Folder Autopilot", "wand.and.stars", "Rules that tidy folders on their own") { AutopilotScreen() }
+                tool("Wi-Fi", "wifi", "The Mac's network, signal and nearby networks") { WiFiScreen() }
+                tool("Sound Mixer", "slider.vertical.3", "Volume for every app and the output") { SoundScreen() }
+            }
+            Section("Make room") {
+                tool("Free Up Space", "sparkles", "Cleanup suggestions, safe and undoable") { SpaceScreen() }
+                tool("Disk Map", "square.grid.3x3.square", "What's eating the disk, as a map") { DiskMapScreen() }
+                tool("Duplicate Finder", "doc.on.doc", "Identical files, keep just one") { DuplicatesScreen() }
+                tool("Forgotten Files", "clock.badge.questionmark", "Big files you haven't opened in ages") { ForgottenScreen() }
+                tool("App Uninstaller", "trash.square", "Remove apps and what they leave behind") { UninstallerScreen() }
+            }
+            Section("Fix a slow Mac") {
+                tool("Heart monitor", "waveform.path.ecg", "How hard the Mac is working right now") { HeartScreen() }
+                tool("Apps", "square.stack.3d.up.fill", "What's running, and quit what's stuck") { AppsScreen() }
+                tool("Health History", "chart.xyaxis.line", "Heart rate over days, peaks and a report card") { HistoryScreen() }
+                tool("Startup Items", "power", "What opens at login or runs in the background") { StartupScreen() }
+                tool("Network by App", "network", "Who's uploading and downloading right now") { NetworkScreen() }
+                tool("Servers & Ports", "server.rack", "Local servers and Docker, with one-tap stop") { PortsScreen() }
+                tool("Drive Health", "stethoscope", "SMART status, wear, hours and temperature") { DrivesScreen() }
             }
             Section {
                 Toggle(isOn: Binding(get: { link.vitals?.keepAwake ?? false }, set: { on in
@@ -50,6 +70,17 @@ struct ToolsScreen: View {
             Button("OK", role: .cancel) {}
         } message: { Text(error ?? "") }
         .overlay(alignment: .bottom) { Toast(text: toast) }
+    }
+
+    private func tool<D: View>(_ title: String, _ symbol: String, _ blurb: String, @ViewBuilder _ dest: @escaping () -> D) -> some View {
+        NavigationLink { dest() } label: {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                    Text(blurb).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            } icon: { Image(systemName: symbol).foregroundStyle(Color.phosphor) }
+        }
     }
 
     private func act(_ op: String, _ done: String, _ args: [String: Any] = [:]) {
