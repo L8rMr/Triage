@@ -50,6 +50,7 @@ struct HomeScreen: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background(Color.glass900)
         .navigationTitle("Home")
+        .helpTip("Your Mac at a glance: heart rate (how hard it's working), storage, memory and battery. Tap a tile for details. Amber “last reading” means you're offline and these numbers are old.")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             while !Task.isCancelled {

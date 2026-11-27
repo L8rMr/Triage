@@ -41,6 +41,7 @@ struct PDFEditorScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("PDF Editor")
+        .helpTip("Open a PDF from the Mac or the iPhone. ✏️ draws, T adds text, ✍️ signs, 🖼 adds a picture, ■ blacks out, the eraser removes marks, ▦ rearranges pages. Select text to highlight or redact it.")
         .overlay {
             if let loading {
                 VStack(spacing: 10) { ProgressView(); Text(loading).font(.footnote.weight(.semibold)) }

@@ -17,6 +17,9 @@ struct SettingsScreen: View {
 
     var body: some View {
         Form {
+            Section {
+                NavigationLink { HowToScreen() } label: { Label("How to use Triage", systemImage: "questionmark.circle") }
+            }
             appearance
             Section {
                 TextField("Name", text: $deviceName, prompt: Text("Alen's iPhone Duo"))
@@ -43,6 +46,7 @@ struct SettingsScreen: View {
         .scrollContentBackground(.hidden)
         .background(Color.glass900)
         .navigationTitle("Settings")
+        .helpTip("How the phone talks to the Mac, how it looks, and how the remote feels. Theme changes reach the widgets too.")
         .overlay(alignment: .bottom) { Toast(text: note) }
         .confirmationDialog("Forget \(link.macName)?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { link.forgetMac() }

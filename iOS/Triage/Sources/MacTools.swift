@@ -189,6 +189,7 @@ struct DiskMapScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle(here.isEmpty ? "Disk Map" : name(here))
+        .helpTip("Bigger boxes are bigger folders. Tap a folder to go inside; pull ↻ to measure again.")
         .navigationDestination(for: DiskNodeR.self) { n in DiskMapScreen(path: n.path) }
         .toolbar { Button { Task { await load(refresh: true) } } label: { Image(systemName: "arrow.clockwise") } }
         .toolChrome(error: $error, toast: $toast)
@@ -352,6 +353,7 @@ struct DuplicatesScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Duplicate Finder")
+        .helpTip("Finds files whose contents are identical, byte for byte. One copy of each always stays; the rest go to the Trash.")
         .safeAreaInset(edge: .bottom) {
             if link.canEdit && !marked.isEmpty && !running {
                 Button { confirm = true } label: {
@@ -483,6 +485,7 @@ struct ForgottenScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Forgotten Files")
+        .helpTip("Big files in your home folder you haven't opened in a long time: good candidates to delete or move off.")
         .safeAreaInset(edge: .bottom) {
             if link.canEdit && !picks.isEmpty {
                 Button { confirm = true } label: {
@@ -567,6 +570,7 @@ struct UninstallerScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("App Uninstaller")
+        .helpTip("Swipe an app to uninstall it along with the settings and caches it left behind. Everything goes to the Trash.")
         .searchable(text: $query, prompt: "Find an app")
         .toolbar {
             Menu {
@@ -678,6 +682,7 @@ struct StartupScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Startup Items")
+        .helpTip("What opens at login and what runs in the background. Your own items can be switched off; system ones are shown so you know.")
         .toolChrome(error: $error, toast: $toast)
         .task { await load() }
         .refreshable { await load() }
@@ -735,6 +740,7 @@ struct NetworkScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Network by App")
+        .helpTip("Which apps are uploading (amber) and downloading (green) right now, updated every 2 seconds.")
         .toolChrome(error: $error, toast: $toast)
         .task {
             while !Task.isCancelled {
@@ -809,6 +815,7 @@ struct PortsScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Servers & Ports")
+        .helpTip("Things listening for connections on the Mac (dev servers, databases) and Docker containers. Swipe to stop one.")
         .confirmationDialog("Stop \(stopping?.app ?? "") on port \(stopping?.port ?? 0)?", isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
                             titleVisibility: .visible, presenting: stopping) { l in
             Button("Stop", role: .destructive) { Task { await kill(l) } }
@@ -890,6 +897,7 @@ struct HistoryScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Health History")
+        .helpTip("Your Mac's heart rate (how hard it's working) over days, with the busiest moment and what caused it.")
         .toolChrome(error: $error, toast: $toast)
         .task(id: hours) {
             do { let d = try await link.call("toolHistory", ["hours": hours]); samples = decode(d["samples"] ?? []) ?? [] }
@@ -964,6 +972,7 @@ struct DrivesScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Drive Health")
+        .helpTip("SMART status and wear for each drive, plus free space per volume. Wear and temperature need smartctl on the Mac.")
         .toolChrome(error: $error, toast: $toast)
         .task { await load(false) }
         .refreshable { await load(true) }
@@ -1046,6 +1055,7 @@ struct WiFiScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Wi-Fi")
+        .helpTip("The Mac's Wi-Fi: signal, speed and nearby networks. Tap one to make the Mac join it.")
         .toolbar { Button { Task { await load(scan: true) } } label: { Image(systemName: "arrow.clockwise") } }
         .alert("Join \(joining?.ssid ?? "")", isPresented: Binding(get: { joining != nil }, set: { if !$0 { joining = nil } })) {
             SecureField("Password", text: $password)
@@ -1145,6 +1155,7 @@ struct SoundScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Sound Mixer")
+        .helpTip("Volume for the whole Mac and for each app, and which speakers it plays through.")
         .disabled(!link.canEdit)
         .toolChrome(error: $error, toast: $toast)
         .task {
@@ -1218,6 +1229,7 @@ struct TidyScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Tidy Downloads")
+        .helpTip("Sorts loose downloads into folders by kind (Images, Documents…). Things in progress or just opened stay unticked. Undo is on the Mac.")
         .safeAreaInset(edge: .bottom) {
             if link.canEdit && !picks.isEmpty {
                 Button { Task { await apply() } } label: {
@@ -1286,6 +1298,7 @@ struct AutopilotScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Folder Autopilot")
+        .helpTip("Rules that keep folders tidy on their own, every 15 minutes. Make rules on the Mac; switch them on and run them here.")
         .toolChrome(error: $error, toast: $toast)
         .task { await load() }
         .refreshable { await load() }
@@ -1364,6 +1377,7 @@ struct ConverterScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Converter")
+        .helpTip("Converts images, PDFs, documents, audio, video and data files. The new files land next to the originals.")
         .sheet(isPresented: $picking) {
             MacFilePicker(title: "Files to convert") { picked in files = picked; outputs = []; failed = []; Task { await loadTargets() } }
         }
@@ -1457,6 +1471,7 @@ struct RenameScreen: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Batch Rename")
+        .helpTip("Renames many files at once. {name} keeps the old name, {n} numbers them, {date} adds the date. Red means that name is taken.")
         .toolbar { if !files.isEmpty { EditButton() } }
         .safeAreaInset(edge: .bottom) {
             if link.canEdit && !files.isEmpty {

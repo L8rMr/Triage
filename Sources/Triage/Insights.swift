@@ -159,7 +159,7 @@ struct GlanceDashboard: View {
 
     // Screen time today: total + top apps with their icons
     private var screenTime: some View {
-        let top = time.top(time.today)
+        let top = Array(time.top(time.today).prefix(3))   // three apps keep the tile the same size as its neighbours
         let total = time.today?.seconds.values.reduce(0, +) ?? 0
         let maxSecs = max(top.first?.secs ?? 1, 1)
         let tint = Color(hex6: 0x7C5CFF)
@@ -362,7 +362,10 @@ struct GlanceDashboard: View {
 }
 
 /// A dashboard card: soft tinted glow in the corner, a small labelled header, then the content.
+enum TileSize { static let height: CGFloat = 250 }
+
 struct Tile<Content: View>: View {
+    static var height: CGFloat { TileSize.height }
     let title: String, symbol: String, tint: Color
     var action: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
@@ -379,7 +382,7 @@ struct Tile<Content: View>: View {
             content()
         }
         .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 210, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: Tile.height, maxHeight: Tile.height, alignment: .topLeading)   // every tile the same size
         .background(alignment: .topTrailing) {
             Circle().fill(tint.opacity(0.16)).frame(width: 180, height: 180).blur(radius: 50).offset(x: 50, y: -60).allowsHitTesting(false)
         }

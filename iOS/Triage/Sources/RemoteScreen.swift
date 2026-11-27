@@ -408,6 +408,7 @@ struct RemoteScreen: View {
                 .pickerStyle(.segmented)
                 .frame(width: 150)
                 Spacer()
+                HelpTip("Trackpad: one finger moves, tap clicks, two-finger tap right-clicks, two fingers scroll, three (or four) swipe for Mission Control and Spaces. Keyboard: tap a modifier once for the next key, twice to lock. Aǀ opens the iPhone keyboard with swipe typing. ⚡ shortcuts, ▦ apps, 📋 pastes your iPhone clipboard on the Mac.")
                 Button { showShortcuts = true } label: { Image(systemName: "bolt.fill").frame(width: 30, height: 30) }
                     .popover(isPresented: $showShortcuts) {
                         shortcutGrid

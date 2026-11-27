@@ -56,6 +56,7 @@ struct FilesScreen: View {
         .scrollContentBackground(.hidden)
         .background(Color.glass900)
         .navigationTitle("Files")
+        .helpTip("Browse your Mac's folders. Ask in plain words (“big files in Downloads”). Tap a file to open it; long-press for Share, Open on Mac, Move, Rename, Info and more.")
         .navigationDestination(for: FileEntry.self) { e in FolderScreen(path: e.path) }
         // Results get the full folder screen: tap opens the file, long-press for every action.
         .navigationDestination(isPresented: Binding(get: { asked != nil }, set: { if !$0 { asked = nil } })) {

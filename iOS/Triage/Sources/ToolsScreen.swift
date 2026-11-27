@@ -55,6 +55,7 @@ struct ToolsScreen: View {
         .scrollContentBackground(.hidden)
         .background(Color.glass900)
         .navigationTitle("Tools")
+        .helpTip("Every Triage tool from the Mac, run from here. Things that delete go to the Mac's Trash first, so they can be undone.")
         .confirmationDialog("Put \(link.macName) to sleep?", isPresented: $askSleep, titleVisibility: .visible) {
             Button("Sleep") { act("sleepMac", "Sleeping") }
         } message: { Text("The phone loses its connection until the Mac wakes up.") }

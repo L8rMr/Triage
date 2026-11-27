@@ -52,7 +52,14 @@ struct MacKeyboard: View {
         let names = ["delete": "⌫", "return": "↩", "tab": "⇥", "space": "␣", "escape": "esc", "left": "←", "right": "→", "up": "↑", "down": "↓"]
         var face = names[key] ?? key
         if face.count == 1, m.contains("shift") { face = face.uppercased() }
-        echo = Array((echo + [marks + face]).suffix(14))
+        let tag = marks + face
+        // a held key reads "⌫×14", not fourteen ⌫s
+        if let last = echo.last, last == tag || last.hasPrefix(tag + "×") {
+            let n = (Int(last.split(separator: "×").last.map(String.init) ?? "") ?? 1) + 1
+            echo[echo.count - 1] = "\(tag)×\(n)"
+        } else {
+            echo = Array((echo + [tag]).suffix(14))
+        }
         echoAt = Date()
         let at = echoAt
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { if echoAt == at { withAnimation(.easeOut(duration: 0.3)) { echo = [] } } }
@@ -240,8 +247,13 @@ private struct RepeatKey<Label: View>: View {
             }
             .contentShape(Rectangle())
             .onAppear { KeyFeel.prepare() }
+            .onDisappear { stop() }
+            // @GestureState resets itself when the touch ends *or* is interrupted (a redraw, a scroll, a system
+            // gesture), so a held key can never get stuck repeating.
+            .onChange(of: pressing) { _, now in if !now { release() } }
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($pressing) { _, state, _ in state = true }
                     .onChanged { _ in
                         guard !down else { return }
                         down = true
@@ -249,18 +261,30 @@ private struct RepeatKey<Label: View>: View {
                         KeyFeel.down(sound: sound)
                         action()
                         if repeats {
+                            let started = Date()
                             timer = Timer.scheduledTimer(withTimeInterval: 0.42, repeats: false) { _ in
-                                timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { _ in action(); KeyFeel.repeatTick() }
+                                timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { t in
+                                    // belt and braces: stop if the finger is gone, or after 8 seconds of holding
+                                    guard down, Date().timeIntervalSince(started) < 8 else { t.invalidate(); return }
+                                    action(); KeyFeel.repeatTick()
+                                }
                             }
                         }
                     }
-                    .onEnded { _ in
-                        down = false; timer?.invalidate(); timer = nil
-                        KeyFeel.up()
-                        // keep the light on long enough to be seen, even after a lightning-fast tap
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { if !down { lit = false } }
-                    }
+                    .onEnded { _ in release() }
             )
+    }
+
+    @GestureState private var pressing = false
+
+    private func stop() { timer?.invalidate(); timer = nil; down = false; lit = false }
+
+    private func release() {
+        guard down else { return }
+        down = false; timer?.invalidate(); timer = nil
+        KeyFeel.up()
+        // keep the light on long enough to be seen, even after a lightning-fast tap
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { if !down { lit = false } }
     }
 }
 

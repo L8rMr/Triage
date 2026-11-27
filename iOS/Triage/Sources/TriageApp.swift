@@ -66,7 +66,7 @@ extension TriageRemoteApp {
 }
 
 enum Pane: String, CaseIterable, Identifiable, Hashable {
-    case home, heart, files, remote, tools, settings
+    case home, heart, files, remote, tools, settings, help
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -76,6 +76,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
         case .remote: return "Remote"
         case .tools: return "Tools"
         case .settings: return "Settings"
+        case .help: return "How to"
         }
     }
     var symbol: String {
@@ -86,6 +87,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
         case .remote: return "display"
         case .tools: return "wrench.and.screwdriver.fill"
         case .settings: return "gearshape.fill"
+        case .help: return "questionmark.circle.fill"
         }
     }
     /// The phone's tab bar holds five; the heart monitor lives on Home (and in the sidebar when there's room).
@@ -150,6 +152,7 @@ struct MainView: View {
         case .remote: RemoteScreen(exit: { section = previous })
         case .tools: ToolsScreen()
         case .settings: SettingsScreen()
+        case .help: HowToScreen()
         }
     }
 }
