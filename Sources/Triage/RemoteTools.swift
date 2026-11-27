@@ -275,7 +275,7 @@ final class ToolHub {
 
     /// The phone reached us on the local network (so Wi-Fi off would cut it off).
     static func overLAN(_ s: RemoteSession) -> Bool {
-        guard !s.framed, case .hostPort(let host, _)? = s.conn.currentPath?.remoteEndpoint else { return false }
+        guard !s.framed, case .hostPort(let host, _)? = s.conn.currentPath?.remoteEndpoint ?? s.conn.endpoint as NWEndpoint? else { return false }
         let h = "\(host)".split(separator: "%").first.map(String.init) ?? ""
         if h.hasPrefix("100.") { return false }          // Tailscale
         return h.hasPrefix("192.168.") || h.hasPrefix("10.") || h.hasPrefix("fe80") || h.hasPrefix("fd") || h.hasPrefix("169.254.")

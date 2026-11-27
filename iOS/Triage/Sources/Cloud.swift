@@ -21,6 +21,8 @@ struct CloudMac: Identifiable, Equatable {
     let port: Int
     let mode: String
     let seen: Date
+    /// The router's TCP door to the Mac's WebSocket port, when it opened one (sent inside "mode": "full;tcp=52384").
+    var tcpPort: Int? { mode.split(separator: ";").first { $0.hasPrefix("tcp=") }.flatMap { Int($0.dropFirst(4)) } }
 }
 
 final class CloudDirectory: ObservableObject {

@@ -575,7 +575,11 @@ final class RemoteSession {
                        "paired": known, "mode": server.mode.rawValue])
             // Same iCloud account? The phone read our pairing key from the private database: no code needed.
             cloudCandidate = !known && ((o["cloud"] as? [String]) ?? []).contains(RemoteServer.macID)
-            if !known && !cloudCandidate { code = server.beginPairing(self) }
+            if !known && !cloudCandidate {
+                // A new phone pairs with a code only on the same network: nobody on the internet can pop the code up.
+                guard ToolHub.overLAN(self) else { reject("Pair on the same Wi-Fi first (or sign the phone into the same iCloud account)"); return }
+                code = server.beginPairing(self)
+            }
 
         case "auth":
             guard let id = deviceID, let secret = server.secret(for: id),

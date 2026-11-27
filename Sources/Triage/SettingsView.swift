@@ -305,7 +305,7 @@ private struct IPhonePage: View {
                     Button("Stop") { remote.endDesktop() }
                 }
             }
-            Row(title: "From anywhere", hint: cloud.publicAddress.map { "Internet address \($0)" + (PortMap.shared.mapped != nil ? " · router forwards it" : "") }) {
+            Row(title: "From anywhere", hint: cloud.publicAddress.map { "Internet address \($0)" + (PortMap.udp.mapped != nil ? " · router forwards it" : "") }) {
                 Text(cloud.status).font(.ui(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.trailing).frame(maxWidth: 360, alignment: .trailing)
             }
             Row(title: "Status", hint: remote.keepAwake ? "Kept awake from the iPhone" : nil) {

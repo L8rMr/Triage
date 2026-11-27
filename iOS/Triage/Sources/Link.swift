@@ -159,6 +159,8 @@ final class MacLink: ObservableObject {
         var p: [Route] = []
         if let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
         if PathWatch.shared.onWiFi { p += mac.lan.prefix(2).map { .address("\($0):\(mac.port)", "Wi-Fi") } }
+        // Away: the router's TCP door first (gets through every carrier and relay), then QUIC, then a knock.
+        if let h = mac.publicHost, let t = mac.tcpPort { p.append(.address("\(h):\(t)", "Internet (direct)")) }
         if mac.publicHost != nil { p.append(.direct(mac)) }
         p.append(.p2p(mac))
         return p
