@@ -294,7 +294,9 @@ final class MacLink: ObservableObject {
         // Away from home, go out on the phone's real network (cellular or Wi-Fi), not through a VPN tunnel: work VPNs
         // carry the traffic to a corporate network that won't pass it to a home Mac. If the VPN insists on carrying
         // everything, iOS keeps it in the tunnel anyway.
-        if label != "Wi-Fi", PathWatch.shared.vpn, let i = PathWatch.shared.physical { params.requiredInterface = i }
+        // Pick the network TYPE, never one specific interface: phones carry several cellular interfaces (pdp_ip0, 1, …)
+        // and only the system knows which one carries internet traffic; pinning the wrong one gives "Network is down".
+        if label != "Wi-Fi", PathWatch.shared.vpn { params.requiredInterfaceType = PathWatch.shared.onWiFi ? .wifi : .cellular }
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
         let wait: Double = target.quic || label != "Wi-Fi" ? 5 : 3

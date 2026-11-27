@@ -255,7 +255,8 @@ final class PathWatch {
             guard let self else { return }
             let wifi = p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet)
             let real = p.availableInterfaces.filter { [.wifi, .wiredEthernet, .cellular].contains($0.type) }
-            self.vpn = p.availableInterfaces.contains { $0.type == .other && ($0.name.hasPrefix("utun") || $0.name.hasPrefix("ipsec")) }
+            // iOS always has utun interfaces of its own; a VPN is only "on" when traffic actually goes through a tunnel
+            self.vpn = p.usesInterfaceType(.other)
             self.physical = real.first { $0.type != .cellular && wifi } ?? real.first { $0.type == .cellular } ?? real.first
             let was = self.onWiFi
             self.onWiFi = wifi
