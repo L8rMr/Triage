@@ -176,6 +176,11 @@ struct ConnectView: View {
     private func failed(_ why: String) -> some View {
         VStack(spacing: 14) {
             Text(why).font(.callout).foregroundStyle(Color.amber).multilineTextAlignment(.center)
+            if PathWatch.shared.vpn {
+                Label("A VPN is on and carries all of this iPhone's traffic, so it can't reach your Mac. Turn the VPN off, then try again.", systemImage: "lock.shield")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                    .padding(12).background(Color.glass700, in: RoundedRectangle(cornerRadius: 12))
+            }
             Button("Try again") { link.disconnect() }
                 .buttonStyle(.borderedProminent)
             if !link.notes.isEmpty { notesCard }
