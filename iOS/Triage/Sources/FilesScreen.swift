@@ -12,6 +12,7 @@ struct FilesScreen: View {
     @State private var query = ""
     @State private var results: [FileEntry]?
     @State private var searching = false
+    @State private var asked: String?
 
     var body: some View {
         Group {
@@ -35,7 +36,7 @@ struct FilesScreen: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(["largest videos", "big files in Downloads", "screenshots this week", "pdfs from last month", "dmg installers"], id: \.self) { s in
-                                Button(s) { query = s; Task { await search() } }.buttonStyle(.bordered).controlSize(.small)
+                                Button(s) { asked = s }.buttonStyle(.bordered).controlSize(.small)
                             }
                         }
                     }
@@ -56,10 +57,13 @@ struct FilesScreen: View {
         .background(Color.glass900)
         .navigationTitle("Files")
         .navigationDestination(for: FileEntry.self) { e in FolderScreen(path: e.path) }
+        // Results get the full folder screen: tap opens the file, long-press for every action.
+        .navigationDestination(isPresented: Binding(get: { asked != nil }, set: { if !$0 { asked = nil } })) {
+            if let q = asked { FolderScreen(path: link.info?.home ?? "~", global: true, initialQuery: q) }
+        }
         .searchable(text: $query, prompt: "Ask: largest videos in Downloads")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, q in if q.isEmpty { results = nil } }
-        .overlay { if searching { ProgressView() } }
         .task {
             if places.isEmpty, let d = try? await link.call("favorites"), let p: [Place] = decode(d["places"] ?? []) { places = p }
         }
@@ -67,10 +71,8 @@ struct FilesScreen: View {
 
     private func search() async {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { results = nil; return }
-        searching = true
-        defer { searching = false }
-        if let d = try? await link.call("search", ["q": q, "limit": 150]) { results = decode(d["hits"] ?? []) ?? [] }
+        guard !q.isEmpty else { return }
+        asked = q
     }
 }
 
@@ -78,6 +80,9 @@ struct FilesScreen: View {
 
 struct FolderScreen: View {
     let path: String
+    /// Search the whole Mac instead of this folder (the Files tab's "Ask your Mac").
+    var global = false
+    var initialQuery: String? = nil
     @EnvironmentObject var link: MacLink
     @Environment(\.horizontalSizeClass) private var hsc
     @AppStorage("files.grid") private var grid = false
@@ -107,6 +112,8 @@ struct FolderScreen: View {
     @State private var showPhotos = false
     @State private var error: String?
     @State private var toast: String?
+    @State private var editing: PDFSource?
+    @State private var showFolder: FileEntry?
 
     private var shown: [FileEntry] {
         let base = results ?? entries
@@ -129,11 +136,15 @@ struct FolderScreen: View {
             .background(Color.glass900)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "Search this folder")
+            .searchable(text: $query, prompt: global ? "Ask your Mac" : "Search this folder")
             .onSubmit(of: .search) { Task { await search() } }
             .onChange(of: query) { _, q in if q.isEmpty { results = nil } }
             .toolbar { toolbar }
-            .task(id: "\(path)|\(hidden)") { await load() }
+            .task(id: "\(path)|\(hidden)") {
+                if let q = initialQuery, results == nil { query = q; await search() } else if !global { await load() }
+            }
+            .navigationDestination(item: $showFolder) { f in FolderScreen(path: f.path) }
+            .fullScreenCover(item: $editing) { src in NavigationStack { PDFEditView(source: src) }.environmentObject(link) }
             .refreshable { if results != nil { await search() } else { await load() } }
             .quickLookPreview($preview)
             .sheet(isPresented: $sharing) { ShareSheet(items: shareItems).presentationDetents([.medium, .large]) }
@@ -202,9 +213,9 @@ struct FolderScreen: View {
     @ViewBuilder private func row(_ e: FileEntry) -> some View {
         Group {
             if e.isDir && !selecting {
-                NavigationLink(value: e) { FileRow(entry: e) }
+                NavigationLink(value: e) { FileRow(entry: e, subtitle: where_(e)) }
             } else {
-                Button { tap(e) } label: { FileRow(entry: e) }.buttonStyle(.plain)
+                Button { tap(e) } label: { FileRow(entry: e, subtitle: where_(e)) }.buttonStyle(.plain)
             }
         }
         .tag(e.id)
@@ -232,6 +243,11 @@ struct FolderScreen: View {
         .contextMenu { menu(e) }
     }
 
+    /// In search results, say where each thing lives.
+    private func where_(_ e: FileEntry) -> String? {
+        results == nil ? nil : (e.path as NSString).deletingLastPathComponent.tildePath(home: link.info?.home)
+    }
+
     private func tap(_ e: FileEntry) {
         if selecting {
             if selection.contains(e.id) { selection.remove(e.id) } else { selection.insert(e.id) }
@@ -245,17 +261,28 @@ struct FolderScreen: View {
     private func actions(for e: FileEntry) -> [FileAction] {
         var a: [FileAction] = []
         if !e.isDir {
-            a.append(FileAction(title: "Open on iPhone", symbol: "eye") { open(e) })
-            a.append(FileAction(title: "Save to iPhone or Share", symbol: "square.and.arrow.down.on.square") { save([e]) })
+            a.append(FileAction(title: "Open", symbol: "eye") { open(e) })
+            a.append(FileAction(title: "Share or Save to iPhone", symbol: "square.and.arrow.up") { save([e]) })
+            if (e.name as NSString).pathExtension.lowercased() == "pdf" {
+                a.append(FileAction(title: "Edit PDF", symbol: "pencil.tip.crop.circle") { editPDF(e) })
+            }
         }
+        if results != nil {
+            a.append(FileAction(title: "Show Enclosing Folder", symbol: "folder") {
+                showFolder = FileEntry(name: ((e.path as NSString).deletingLastPathComponent as NSString).lastPathComponent,
+                                       path: (e.path as NSString).deletingLastPathComponent, dir: true)
+            })
+        }
+        a.append(FileAction(title: "Copy Path", symbol: "link") { UIPasteboard.general.string = e.path; say("Path copied") })
         if link.canEdit {
             a.append(FileAction(title: "Open on Mac", symbol: "laptopcomputer") { simple("open", e, done: "Opened on \(link.macName)") })
-            a.append(FileAction(title: "Show in Finder", symbol: "magnifyingglass") { simple("reveal", e, done: "Shown in Finder") })
+            a.append(FileAction(title: "Show in Finder on Mac", symbol: "magnifyingglass") { simple("reveal", e, done: "Shown in Finder") })
             if e.trashable == true {
                 a.append(FileAction(title: "Rename", symbol: "pencil") { newName = e.name; renaming = e })
                 a.append(FileAction(title: "Move to…", symbol: "folder") { pickItems = [e]; pickOp = "move" })
             }
             a.append(FileAction(title: "Copy to…", symbol: "doc.on.doc") { pickItems = [e]; pickOp = "copy" })
+            a.append(FileAction(title: "Duplicate", symbol: "plus.square.on.square") { run("copy", [e], to: (e.path as NSString).deletingLastPathComponent) })
             if e.trashable == true { a.append(FileAction(title: "Move to Trash", symbol: "trash", destructive: true) { confirmTrash = [e] }) }
         }
         return a
@@ -368,7 +395,9 @@ struct FolderScreen: View {
         guard !q.isEmpty else { results = nil; return }
         loading = true
         defer { loading = false }
-        if let d = try? await link.call("search", ["q": q, "scope": path, "limit": 150]) { results = decode(d["hits"] ?? []) ?? [] }
+        var a: [String: Any] = ["q": q, "limit": 200]
+        if !global { a["scope"] = path }
+        if let d = try? await link.call("search", a) { results = decode(d["hits"] ?? []) ?? [] }
     }
 
     private func fetch(_ items: [FileEntry]) async -> [URL] {
@@ -385,6 +414,13 @@ struct FolderScreen: View {
     private func open(_ e: FileEntry) {
         Task { if let u = await fetch([e]).first { preview = u } }
     }
+
+    private func editPDF(_ e: FileEntry) {
+        Task { if let u = await fetch([e]).first { editing = PDFSource(local: u, macPath: e.path) } }
+    }
+
+    /// After a change: redo the search if we're showing results, else reload the folder.
+    private func refresh() async { if results != nil { await search() } else { await load() } }
 
     /// Mac → iPhone: download, then the share sheet's Save to Files / Photos / AirDrop / any app.
     private func save(_ items: [FileEntry]) {
@@ -408,7 +444,7 @@ struct FolderScreen: View {
             do {
                 _ = try await link.call("rename", ["path": e.path, "name": n])
                 UISelectionFeedbackGenerator().selectionChanged()
-                await load()
+                await refresh()
             } catch { self.error = error.localizedDescription }
         }
     }
@@ -426,7 +462,7 @@ struct FolderScreen: View {
                 let ok = (d["done"] as? [String])?.count ?? 0
                 say("\(op == "move" ? "Moved" : "Copied") \(ok) item\(ok == 1 ? "" : "s") to \((dir as NSString).lastPathComponent)")
                 selecting = false; selection = []
-                await load()
+                await refresh()
             } catch { self.error = error.localizedDescription }
         }
     }

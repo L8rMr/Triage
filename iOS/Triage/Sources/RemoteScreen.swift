@@ -378,7 +378,7 @@ struct RemoteScreen: View {
                     .labelStyle(.iconOnly).buttonBorderShape(.circle).tint(.white.opacity(0.2))
                 barButton("chevron.down", "Hide") { chrome = false }
             }
-            KeyCapture(active: $typing, send: send, mods: { takeMods() }).frame(width: 1, height: 1).opacity(0.01)
+            SwipeTyper(active: $typing, send: send, mods: { takeMods() })
         }
         .padding(10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -438,7 +438,7 @@ struct RemoteScreen: View {
                     }
                 }
             }
-            KeyCapture(active: $typing, send: send, mods: { takeMods() }).frame(width: 1, height: 1).opacity(0.01)
+            SwipeTyper(active: $typing, send: send, mods: { takeMods() })
         }
         .padding(10)
         .background(Color(white: 0.07))
@@ -959,6 +959,135 @@ final class KeyCaptureView: UIView, UIKeyInput {
     }
 
     /// Hardware keyboards (Magic Keyboard, Duo keyboard case): arrows, escape and ⌘-shortcuts go straight through.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var handled = false
+        for p in presses {
+            guard let k = p.key else { continue }
+            var m: [String] = []
+            if k.modifierFlags.contains(.command) { m.append("cmd") }
+            if k.modifierFlags.contains(.alternate) { m.append("opt") }
+            if k.modifierFlags.contains(.control) { m.append("ctrl") }
+            if k.modifierFlags.contains(.shift) { m.append("shift") }
+            let special: [UIKeyboardHIDUsage: String] = [
+                .keyboardLeftArrow: "left", .keyboardRightArrow: "right", .keyboardUpArrow: "up", .keyboardDownArrow: "down",
+                .keyboardEscape: "escape", .keyboardTab: "tab", .keyboardDeleteForward: "forwarddelete",
+                .keyboardHome: "home", .keyboardEnd: "end", .keyboardPageUp: "pageup", .keyboardPageDown: "pagedown",
+            ]
+            if let name = special[k.keyCode] {
+                send([["k": "key", "key": name, "mods": m]]); handled = true
+            } else if m.contains("cmd") || m.contains("ctrl") || m.contains("opt") {
+                let c = k.charactersIgnoringModifiers.lowercased()
+                if !c.isEmpty { send([["k": "key", "key": c == " " ? "space" : c, "mods": m]]); handled = true }
+            }
+        }
+        if !handled { super.pressesBegan(presses, with: event) }
+    }
+}
+
+
+// MARK: - Swipe typing: the iPhone keyboard with QuickPath, autocorrect and predictions, mirrored live onto the Mac
+
+/// The iPhone keyboard types into a little strip you can see; every change (a swiped word, an autocorrection,
+/// a prediction, a backspace) is sent to the Mac as the difference, so the Mac's text always matches the strip.
+struct SwipeTyper: View {
+    @Binding var active: Bool
+    let send: ([[String: Any]]) -> Void
+    let mods: () -> [String]
+
+    var body: some View {
+        if active {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.draw").foregroundStyle(Color.phosphor)
+                SwipeField(active: $active, send: send, mods: mods)
+                    .frame(height: 34)
+                Button { active = false } label: { Image(systemName: "keyboard.chevron.compact.down") }
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+private struct SwipeField: UIViewRepresentable {
+    @Binding var active: Bool
+    let send: ([[String: Any]]) -> Void
+    let mods: () -> [String]
+
+    func makeUIView(context: Context) -> MirrorField {
+        let f = MirrorField()
+        f.placeholder = "Type or swipe… it appears on the Mac as you go"
+        f.textColor = .white
+        f.tintColor = UIColor(Color.phosphor)
+        f.font = .systemFont(ofSize: 16)
+        f.keyboardAppearance = .dark
+        f.autocorrectionType = .default
+        f.autocapitalizationType = .sentences
+        f.spellCheckingType = .default
+        f.smartQuotesType = .no          // the Mac gets plain quotes and dashes, like a real keyboard
+        f.smartDashesType = .no
+        f.returnKeyType = .default
+        f.addTarget(f, action: #selector(MirrorField.changed), for: .editingChanged)
+        f.delegate = f
+        f.onDone = { DispatchQueue.main.async { active = false } }
+        return f
+    }
+
+    func updateUIView(_ f: MirrorField, context: Context) {
+        f.send = send
+        f.mods = mods
+        if active && !f.isFirstResponder { DispatchQueue.main.async { f.becomeFirstResponder() } }
+    }
+}
+
+final class MirrorField: UITextField, UITextFieldDelegate {
+    var send: ([[String: Any]]) -> Void = { _ in }
+    var mods: () -> [String] = { [] }
+    var onDone: () -> Void = {}
+    private var sent = ""      // what the Mac has from this strip so far
+
+    @objc func changed() {
+        let now = text ?? ""
+        let m = mods()
+        if !m.isEmpty, now.count == sent.count + 1, now.hasPrefix(sent), let c = now.last {
+            // a modifier is armed: ⌘ + c is a shortcut, not the letter
+            send([["k": "key", "key": String(c).lowercased(), "mods": m]])
+            text = sent
+            return
+        }
+        // common start, then backspace what changed and type the new ending
+        let a = Array(sent), b = Array(now)
+        var i = 0
+        while i < a.count && i < b.count && a[i] == b[i] { i += 1 }
+        var events: [[String: Any]] = Array(repeating: ["k": "key", "key": "delete", "mods": [String]()], count: a.count - i)
+        if i < b.count { events.append(["k": "text", "s": String(b[i...])]) }
+        if !events.isEmpty { send(events) }
+        sent = now
+        // keep the strip short: once a sentence is long, start fresh (the Mac keeps everything)
+        if now.count > 160, now.hasSuffix(" ") { text = ""; sent = "" }
+    }
+
+    func textFieldShouldReturn(_ f: UITextField) -> Bool {
+        send([["k": "key", "key": "return", "mods": mods()]])
+        text = ""; sent = ""
+        return false
+    }
+
+    /// Backspace on an empty strip still deletes on the Mac.
+    override func deleteBackward() {
+        if (text ?? "").isEmpty { send([["k": "key", "key": "delete", "mods": mods()]]); return }
+        super.deleteBackward()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let r = super.resignFirstResponder()
+        text = ""; sent = ""
+        onDone()
+        return r
+    }
+
+    /// Hardware keyboards: arrows, escape, tab and shortcuts go straight to the Mac.
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for p in presses {
