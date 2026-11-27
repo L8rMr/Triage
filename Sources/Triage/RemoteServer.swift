@@ -455,7 +455,14 @@ final class RemoteSession {
 
     func start() {
         let framed = self.framed, peer = "\(conn.endpoint)"
+        let remote: Bool = {
+            guard case .hostPort(let h, _) = conn.endpoint else { return false }
+            let ip = "\(h)"
+            return !(ip.hasPrefix("192.168.") || ip.hasPrefix("10.") || ip.hasPrefix("fe80") || ip.hasPrefix("127.") || ip.hasPrefix("::1") || ip.hasPrefix("169.254."))
+        }()
+        if framed || remote { internetPeer = peer }
         if framed { server.record("Internet", "Connection attempt from \(peer)") }
+        else if remote { server.record("Internet", "TCP connection from \(peer)") }
         conn.stateUpdateHandler = { [weak self] st in
             switch st {
             case .ready: if framed { self?.server.record("Internet", "Secure link up with \(peer)") }
@@ -482,7 +489,10 @@ final class RemoteSession {
         server.dropped(self)
     }
 
+    private var internetPeer: String?
+
     func reject(_ why: String) {
+        if let p = internetPeer { server.record("Internet", "Refused \(p): \(why)") }
         if key != nil { push("bye", ["reason": why]) } else { sendPlain(["t": "error", "error": why]) }
         server.queue.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.close() }
     }
