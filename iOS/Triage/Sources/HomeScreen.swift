@@ -73,6 +73,16 @@ struct HomeScreen: View {
             Text(greeting).font(.largeTitle.weight(.bold))
             Text(statusLine).font(.subheadline).foregroundStyle(.secondary)
                 .lineLimit(2, reservesSpace: true)
+            if link.phase != .ready, let v = link.vitals {
+                // not connected: what's below is the Mac's last real reading, so say how old it is
+                Label {
+                    Text("Not connected · last reading \(Date(timeIntervalSince1970: v.t), style: .relative) ago")
+                } icon: { Image(systemName: "clock.badge.exclamationmark") }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.amber)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Color.amber.opacity(0.12), in: Capsule())
+            }
         }
     }
 

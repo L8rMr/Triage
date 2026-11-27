@@ -15,6 +15,12 @@
     <key>ITSAppUsesNonExemptEncryption</key><false/>
     <key>NSLocalNetworkUsageDescription</key><string>Triage finds your Mac on this Wi-Fi so you can check its vitals and files.</string>
     <key>NSBonjourServices</key><array><string>_triage._tcp</string></array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array><string>com.alenlvovich.triage.ios.refresh</string></array>
+    <key>UIBackgroundModes</key>
+    <array><string>fetch</string></array>
+    <key>CFBundleURLTypes</key>
+    <array><dict><key>CFBundleURLSchemes</key><array><string>triage</string></array></dict></array>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key><true/>

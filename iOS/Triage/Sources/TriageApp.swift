@@ -8,6 +8,8 @@ struct TriageRemoteApp: App {
     @ObservedObject private var theme = ThemeModel.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    init() { WidgetFeed.shared.register() }      // background refreshes for the Home Screen widgets
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -24,6 +26,7 @@ struct TriageRemoteApp: App {
             .fontDesign(theme.palette.mono ? .monospaced : .default)
             .background(Color.glass900.ignoresSafeArea())
             .onAppear {
+                WidgetFeed.shared.start()
                 browser.start()
                 PathWatch.shared.changed = { link.networkChanged(); cloud.refreshSoon() }
                 Task { await cloud.refresh(); fallBackToHost() }
@@ -31,10 +34,11 @@ struct TriageRemoteApp: App {
             .onChange(of: scenePhase) { _, p in
                 switch p {
                 case .active: browser.start(); link.resume(); Task { await cloud.refresh(); fallBackToHost() }
-                case .background: link.suspend(); browser.stop()
+                case .background: link.suspend(); browser.stop(); WidgetFeed.shared.schedule()
                 default: break
                 }
             }
+            .onChange(of: theme.activeID) { _, _ in WidgetFeed.shared.themeChanged() }
             // Paired before? Walk straight back in as soon as Bonjour sees that Mac.
             .onChange(of: browser.macs) { _, macs in
                 // Already in over the internet and now home: hop onto Wi-Fi.

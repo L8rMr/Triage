@@ -27,3 +27,20 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
+    dependencies:
+      - target: TriageWidgets
+  TriageWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: TriageWidgets
+      - path: Triage/Sources/Theme.swift
+      - path: Triage/Sources/WidgetSnap.swift
+    settings:
+      base:
+        PRODUCT_NAME: TriageWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.alenlvovich.triage.ios.widgets
+        INFOPLIST_FILE: TriageWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TriageWidgets/TriageWidgets.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
