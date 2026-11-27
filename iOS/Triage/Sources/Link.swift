@@ -296,7 +296,8 @@ final class MacLink: ObservableObject {
         // everything, iOS keeps it in the tunnel anyway.
         // Pick the network TYPE, never one specific interface: phones carry several cellular interfaces (pdp_ip0, 1, …)
         // and only the system knows which one carries internet traffic; pinning the wrong one gives "Network is down".
-        if label != "Wi-Fi", PathWatch.shared.vpn { params.requiredInterfaceType = PathWatch.shared.onWiFi ? .wifi : .cellular }
+        // No interface steering: a managed VPN that must carry everything makes any "go around it" request
+        // unsatisfiable ("Network is down"). Let iOS route; the end-to-end encryption doesn't care which way.
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
         let wait: Double = target.quic || label != "Wi-Fi" ? 5 : 3
@@ -319,7 +320,16 @@ final class MacLink: ObservableObject {
                                              "cloud": CloudDirectory.knownMacIDs,
                                              "pub": self.eph.publicKey.rawRepresentation.base64EncodedString()])
                 case .failed(let e): self.dropped("Couldn't reach \(target.id): \(e.localizedDescription)")
-                case .waiting(let e): self.dropped("Waiting for \(target.id): \(e.localizedDescription)")
+                case .waiting(let e):
+                    let p = c.currentPath
+                    let why: String = {
+                        guard let p else { return "" }
+                        var bits = ["path \(p.status)"]
+                        if #available(iOS 14.2, *), p.status == .unsatisfied { bits.append("reason \(p.unsatisfiedReason)") }
+                        bits.append("via " + (p.availableInterfaces.map { "\($0.name)(\($0.type))" }.joined(separator: ",").nilIfEmpty ?? "none"))
+                        return " [" + bits.joined(separator: " · ") + "]"
+                    }()
+                    self.dropped("\(e.localizedDescription)\(why)")
                 case .cancelled: break
                 default: break
                 }
@@ -705,3 +715,5 @@ enum Keychain {
         SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account] as CFDictionary)
     }
 }
+
+private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
