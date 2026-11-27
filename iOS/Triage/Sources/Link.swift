@@ -19,19 +19,21 @@ struct FoundMac: Identifiable, Hashable {
     let endpoint: NWEndpoint
     var quic = false        // the direct internet door (QUIC through a punched hole)
     var localPort: UInt16?  // QUIC must leave from the port STUN saw, or the hole doesn't match
+    var local: NWEndpoint?  // …and from the same address family/interface
 }
 
 /// One way of reaching the Mac. Tried in order until one answers.
 enum Route {
     case lan(FoundMac)                 // Bonjour on this Wi-Fi
     case address(String, String)       // host, label ("Wi-Fi", "Tailscale")
-    case p2p(CloudMac)                 // straight across the internet, introduced by iCloud
+    case direct(CloudMac)              // the Mac's internet address, when its router forwards the port
+    case p2p(CloudMac)                 // straight across the internet, both sides opening their routers (iCloud relays the knock)
 
     var label: String {
         switch self {
         case .lan: return "Wi-Fi"
         case .address(_, let l): return l
-        case .p2p: return "Internet (direct)"
+        case .direct, .p2p: return "Internet (direct)"
         }
     }
 }
@@ -125,10 +127,6 @@ final class MacLink: ObservableObject {
 
     // MARK: Connect / disconnect
 
-    /// Away from home: the Mac's Tailscale name or IP (or any reachable address). Triage listens on port 52384.
-    @Published var remoteHost: String = UserDefaults.standard.string(forKey: "link.host") ?? "" {
-        didSet { UserDefaults.standard.set(remoteHost, forKey: "link.host") }
-    }
 
     static func endpoint(_ host: String) -> NWEndpoint {
         let h = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,7 +150,7 @@ final class MacLink: ObservableObject {
         start([.lan(mac)] + (cloud.map { Self.plan(for: $0, lan: []) } ?? []), cloud: cloud)
     }
 
-    /// From anywhere: this Wi-Fi, the Mac's own addresses, Tailscale, then straight across the internet.
+    /// From anywhere: this Wi-Fi, the Mac's own Wi-Fi addresses, then straight across the internet.
     func connect(anywhere mac: CloudMac, lan: [FoundMac]) {
         start(Self.plan(for: mac, lan: lan), cloud: mac)
     }
@@ -161,14 +159,17 @@ final class MacLink: ObservableObject {
         var p: [Route] = []
         if let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
         if PathWatch.shared.onWiFi { p += mac.lan.prefix(2).map { .address("\($0):\(mac.port)", "Wi-Fi") } }
-        if let t = mac.tailscale, !t.isEmpty { p.append(.address("\(t):\(mac.port)", "Tailscale")) }
-        let typed = (UserDefaults.standard.string(forKey: "link.host") ?? "").trimmingCharacters(in: .whitespaces)
-        if !typed.isEmpty, typed != mac.tailscale { p.append(.address(typed, "Tailscale")) }
+        if mac.publicHost != nil { p.append(.direct(mac)) }
         p.append(.p2p(mac))
         return p
     }
 
+    /// What happened on the last attempt, way by way (shown when the phone can't get through).
+    @Published private(set) var notes: [String] = []
+    private func note(_ s: String) { DispatchQueue.main.async { self.notes = Array((self.notes + [s]).suffix(8)) } }
+
     private func start(_ routes: [Route], cloud: CloudMac?) {
+        DispatchQueue.main.async { self.notes = [] }
         q.async {
             self.wantConnected = true
             self.cloudMac = cloud
@@ -195,19 +196,23 @@ final class MacLink: ObservableObject {
             target = FoundMac(id: cloudMac?.name ?? h, endpoint: Self.endpoint(h))
             label = l
             open()
+        case .direct(let mac):
+            guard let h = mac.publicHost, let pt = mac.publicPort, let port = NWEndpoint.Port(rawValue: UInt16(pt)) else { next(); return }
+            target = FoundMac(id: mac.name, endpoint: .hostPort(host: NWEndpoint.Host(h), port: port), quic: true, localPort: nil)
+            open()
         case .p2p(let mac):
             let g = gen
             DispatchQueue.main.async { if self.phase != .ready { self.phase = .connecting(mac.name) } else { self.reconnecting = true } }
             Task {
                 do {
-                    let local = UInt16.random(in: 49_200...64_000)
-                    guard let me = await Stun.query(localPort: local) else { throw LinkError("This network blocks direct connections") }
-                    let there = try await CloudDirectory.shared.knock(mac, from: me)
+                    guard let me = await Stun.query() else { throw LinkError("Couldn't learn this network's internet address (STUN blocked)") }
+                    self.note("Asked \(mac.name) through iCloud to open its door")
+                    let there = try await CloudDirectory.shared.knock(mac, from: (me.host, me.port))
                     self.q.async {
                         guard self.gen == g, self.wantConnected else { return }
                         self.target = FoundMac(id: mac.name, endpoint: .hostPort(host: NWEndpoint.Host(there.host),
                                                                                 port: NWEndpoint.Port(rawValue: UInt16(there.port))!),
-                                               quic: true, localPort: local)
+                                               quic: true, localPort: nil, local: me.local)
                         self.open()
                     }
                 } catch {
@@ -219,6 +224,7 @@ final class MacLink: ObservableObject {
 
     /// This way in didn't work. On q.
     private func fellThrough(_ why: String) {
+        note("\(label): \(why)")
         if !plan.isEmpty { teardown(); next() } else { lost(why) }
     }
 
@@ -240,7 +246,7 @@ final class MacLink: ObservableObject {
             sec_protocol_options_set_verify_block(quic.securityProtocolOptions, { _, _, done in done(true) }, q)
             params = NWParameters(quic: quic)
             params.allowLocalEndpointReuse = true
-            if let lp = target.localPort { params.requiredLocalEndpoint = .hostPort(host: .ipv4(.any), port: NWEndpoint.Port(rawValue: lp)!) }
+            if let l = target.local { params.requiredLocalEndpoint = l }
             params.defaultProtocolStack.applicationProtocols.insert(NWProtocolFramer.Options(definition: TriageFramer.definition), at: 0)
         } else {
             let tcp = NWProtocolTCP.Options()
@@ -287,7 +293,7 @@ final class MacLink: ObservableObject {
 
     /// A connection ended. Before the Mac answered: try the next way in. After: reconnect. On q.
     private func dropped(_ why: String) {
-        if !heard && !plan.isEmpty { fellThrough(why) } else { lost(why) }
+        if !heard && !plan.isEmpty { fellThrough(why) } else { if !heard { note("\(label): \(why)") }; lost(why) }
     }
 
     /// Going to the background: hang up politely, come back on resume.

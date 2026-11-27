@@ -4,6 +4,7 @@ import Network
 import Security
 import CryptoKit
 import Darwin
+import dnssd
 
 // MARK: - Triage anywhere: iCloud introductions + a direct connection across the internet
 //
@@ -73,6 +74,11 @@ final class CloudPresence: ObservableObject {
         }
         _ = try? await db.modifyRecordZones(saving: [CKRecordZone(zoneID: CloudIDs.zone)], deleting: [])
         startQUIC()
+        // Ask the home router to forward our QUIC port (UPnP / NAT-PMP). With that door open, a phone on any
+        // carrier gets in directly, no knocking needed.
+        DispatchQueue.main.async {
+            PortMap.shared.start(port: CloudIDs.quicPort) { [weak self] mapped in Task { await self?.publish(known: mapped) } }
+        }
         await publish()
         DispatchQueue.main.async {
             self.publishTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { await self?.publish() } }
@@ -85,6 +91,7 @@ final class CloudPresence: ObservableObject {
     // MARK: Publishing this Mac
 
     private func refreshAddress() async {
+        if PortMap.shared.mapped != nil { return }       // the router forwards our port: that address doesn't drift
         guard let a = await Stun.query(localPort: CloudIDs.quicPort) else { return }
         let s = "\(a.host):\(a.port)"
         if s != publicAddress {
@@ -95,7 +102,8 @@ final class CloudPresence: ObservableObject {
 
     func publish(known: (host: String, port: Int)? = nil) async {
         let a: (host: String, port: Int)?
-        if let known { a = known } else { a = await Stun.query(localPort: CloudIDs.quicPort) }
+        if let m = PortMap.shared.mapped { a = m }
+        else if let known { a = known } else { a = await Stun.query(localPort: CloudIDs.quicPort) }
         if let a { DispatchQueue.main.async { self.publicAddress = "\(a.host):\(a.port)" } }
         let id = RemoteServer.macID
         let rec = CKRecord(recordType: "TriageMac", recordID: CKRecord.ID(recordName: "mac-\(id)", zoneID: CloudIDs.zone))
@@ -103,7 +111,6 @@ final class CloudPresence: ObservableObject {
         rec["name"] = Host.current().localizedName ?? "Mac"
         rec["secret"] = Self.cloudSecret
         rec["lan"] = NetAddrs.lan()
-        rec["tailscale"] = NetAddrs.tailscale()
         rec["publicHost"] = a?.host
         rec["publicPort"] = a?.port
         rec["port"] = Int(RemoteServer.preferredPort)
@@ -113,7 +120,8 @@ final class CloudPresence: ObservableObject {
         do {
             try await CloudSave.one(rec, in: db)
             setStatus(a == nil ? "In iCloud · direct internet connection unavailable on this network"
-                               : "In iCloud · reachable from anywhere")
+                      : PortMap.shared.mapped != nil ? "In iCloud · reachable from anywhere (router door open)"
+                      : "In iCloud · reachable from most networks (router has no automatic port forwarding)")
         } catch {
             setStatus("Couldn't update iCloud: \(error.localizedDescription)")
         }
@@ -130,7 +138,7 @@ final class CloudPresence: ObservableObject {
         if let last = lastPunch, -last.timeIntervalSinceNow < 1 { return }
         lastPunch = Date()
         // fresh mapping first (the router may have moved us), then open the door toward the phone
-        let me = await Stun.query(localPort: CloudIDs.quicPort)
+        let me = PortMap.shared.mapped ?? (await Stun.query(localPort: CloudIDs.quicPort))
         Punch.knock(from: CloudIDs.quicPort, to: ph, port: pp)
         rec["state"] = "ready"
         rec["macHost"] = me?.host ?? (rec["macHost"] as? String)
@@ -269,6 +277,34 @@ enum Stun {
             i = v + ((l + 3) & ~3)
         }
         return nil
+    }
+}
+
+// MARK: - Asking the home router to forward our port (mDNSResponder speaks UPnP and NAT-PMP for us)
+
+final class PortMap {
+    static let shared = PortMap()
+    private(set) var mapped: (host: String, port: Int)?
+    private var ref: DNSServiceRef?
+    private var onChange: (((host: String, port: Int)) -> Void)?
+
+    func start(port: UInt16, onChange: @escaping ((host: String, port: Int)) -> Void) {
+        guard ref == nil else { return }
+        self.onChange = onChange
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        let err = DNSServiceNATPortMappingCreate(&ref, 0, 0, DNSServiceProtocol(kDNSServiceProtocol_UDP),
+                                                 port.bigEndian, port.bigEndian, 7200, { _, _, _, err, addr, _, _, ext, _, ctx in
+            guard let ctx else { return }
+            let me = Unmanaged<PortMap>.fromOpaque(ctx).takeUnretainedValue()
+            let extPort = Int(UInt16(bigEndian: ext))
+            guard err == kDNSServiceErr_NoError, addr != 0, extPort != 0 else { me.mapped = nil; return }
+            let b = withUnsafeBytes(of: addr) { Array($0) }          // network order: first byte is the first octet
+            let host = b.map { String($0) }.joined(separator: ".")
+            me.mapped = (host, extPort)
+            me.onChange?((host, extPort))
+        }, ctx)
+        guard err == kDNSServiceErr_NoError, let ref else { self.ref = nil; return }
+        DNSServiceSetDispatchQueue(ref, .main)
     }
 }
 

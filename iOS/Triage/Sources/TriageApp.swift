@@ -50,17 +50,13 @@ struct TriageRemoteApp: App {
 
 extension TriageRemoteApp {
     /// Not on the Mac's Wi-Fi? If Bonjour hasn't found it after a moment, go the long way round:
-    /// your Macs in iCloud (Tailscale, then straight across the internet), else the typed Tailscale name.
+    /// find the Mac through iCloud and connect straight to it across the internet.
     func fallBackToHost() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             guard link.phase == .idle || { if case .failed = link.phase { return true }; return false }() else { return }
             if let want = link.rememberedMac, browser.macs.contains(where: { $0.id == want }) { return }
             let mine = cloud.macs.first { $0.name == link.rememberedMac } ?? (cloud.macs.count == 1 ? cloud.macs.first : nil)
-            if let mine {
-                link.connect(anywhere: mine, lan: browser.macs)
-            } else if !link.remoteHost.isEmpty {
-                link.connect(host: link.remoteHost)
-            }
+            if let mine { link.connect(anywhere: mine, lan: browser.macs) }
         }
     }
 }

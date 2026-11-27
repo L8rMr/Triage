@@ -142,15 +142,13 @@ struct SettingsScreen: View {
             LabeledContent("Mac", value: link.macName)
             LabeledContent("Access", value: link.canEdit ? "Full control" : "View only")
             LabeledContent("Connected over", value: link.route.isEmpty ? "Wi-Fi" : link.route)
-            TextField("Tailscale name, e.g. alens-macbook-air", text: $link.remoteHost)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
             Toggle("Keep \(link.macName) awake", isOn: Binding(get: { link.vitals?.keepAwake ?? false }, set: { on in
                 Task { try? await link.setKeepAwake(on) }
             }))
             Button("Disconnect") { link.disconnect() }
             Button("Forget this Mac", role: .destructive) { confirmForget = true }
         } header: { Text("Connection") } footer: {
-            Text("At home the phone finds the Mac on Wi-Fi. Away, it finds it through your iCloud and connects straight to it, switching between Wi-Fi and cellular on its own. Tailscale (name above) is a backup. Keep the Mac awake to reach it from outside. Change what the phone may do in Triage › Settings › iPhone on the Mac.")
+            Text("At home the phone finds the Mac on Wi-Fi. Away, it finds it through your iCloud and connects straight to it, switching between Wi-Fi and cellular on its own. Nothing in between: iCloud only introduces them. Keep the Mac awake to reach it from outside. Change what the phone may do in Triage › Settings › iPhone on the Mac.")
         }
     }
 

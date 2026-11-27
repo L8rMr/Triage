@@ -7,8 +7,6 @@ struct ConnectView: View {
     @EnvironmentObject var link: MacLink
     @State private var code = ""
     @FocusState private var codeFocused: Bool
-    @State private var askHost = false
-    @State private var host = ""
 
     var body: some View {
         ScrollView {
@@ -113,18 +111,19 @@ struct ConnectView: View {
                     Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
-            Button { host = link.remoteHost; askHost = true } label: {
-                Label("Connect by Tailscale name instead", systemImage: "globe")
-                    .font(.subheadline.weight(.semibold))
+            if !link.notes.isEmpty, case .failed = link.phase {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What happened").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    ForEach(link.notes, id: \.self) { Text("• " + $0).font(.caption).foregroundStyle(.secondary) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.glass700, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.top, 10)
             }
-            .padding(.top, 10)
-            .alert("Connect over Tailscale", isPresented: $askHost) {
-                TextField("alens-macbook-air or 100.x.y.z", text: $host)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Connect") { link.remoteHost = host; link.connect(host: host) }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your Mac's Tailscale name or address. Both devices need Tailscale on; the Mac must be awake with Triage open.")
+            if case .failed = link.phase, awayMacs.isEmpty, !cloud.status.isEmpty {
+                Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
             }
         }
     }

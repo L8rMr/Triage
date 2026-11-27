@@ -128,9 +128,13 @@ final class TriageFramer: NWProtocolFramerImplementation {
 enum Stun {
     static let servers: [(String, UInt16)] = [("stun.l.google.com", 19302), ("stun.cloudflare.com", 3478), ("stun1.l.google.com", 19302)]
 
-    static func query(localPort: UInt16) async -> (host: String, port: Int)? {
+    struct Seen { let host: String; let port: Int; let local: NWEndpoint }
+
+    /// Our public address as the internet sees it, plus the exact local address/port the answer came back to
+    /// (QUIC then leaves from that same spot, so the router mapping matches). Works on IPv4, IPv6 and NAT64 networks.
+    static func query() async -> Seen? {
         for (h, p) in servers {
-            if let r = await once(h, p, localPort) { return r }
+            if let r = await once(h, p) { return r }
         }
         return nil
     }
@@ -140,14 +144,16 @@ enum Stun {
         func take() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
     }
 
-    private static func once(_ host: String, _ port: UInt16, _ local: UInt16) async -> (host: String, port: Int)? {
+    private static func once(_ host: String, _ port: UInt16) async -> Seen? {
         await withCheckedContinuation { cont in
             let params = NWParameters.udp
             params.allowLocalEndpointReuse = true
-            params.requiredLocalEndpoint = .hostPort(host: .ipv4(.any), port: NWEndpoint.Port(rawValue: local)!)
-            let c = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: params)
+            // Ask over IPv4 on purpose (the Mac's address is IPv4): on IPv6-only carriers the phone still gets the
+            // carrier's IPv4 mapping this way, through NAT64.
+            let target: NWEndpoint.Host = ipv4(host).map { .ipv4($0) } ?? NWEndpoint.Host(host)
+            let c = NWConnection(host: target, port: NWEndpoint.Port(rawValue: port)!, using: params)
             let gate = Once()
-            let finish: ((host: String, port: Int)?) -> Void = { r in
+            let finish: (Seen?) -> Void = { r in
                 guard gate.take() else { return }
                 c.cancel()
                 cont.resume(returning: r)
@@ -157,14 +163,29 @@ enum Stun {
             c.stateUpdateHandler = { st in
                 switch st {
                 case .ready:
+                    let local = c.currentPath?.localEndpoint
                     c.send(content: req, completion: .contentProcessed { _ in })
-                    c.receiveMessage { d, _, _, _ in finish(d.flatMap(parse)) }
+                    c.receiveMessage { d, _, _, _ in
+                        guard let local, let m = d.flatMap(parse) else { finish(nil); return }
+                        finish(Seen(host: m.host, port: m.port, local: local))
+                    }
                 case .failed, .cancelled: finish(nil)
                 default: break
                 }
             }
             c.start(queue: .global(qos: .userInitiated))
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { finish(nil) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { finish(nil) }
+        }
+    }
+
+    private static func ipv4(_ name: String) -> IPv4Address? {
+        var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_DGRAM, ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(name, nil, &hints, &res) == 0, let r = res else { return nil }
+        defer { freeaddrinfo(res) }
+        guard let sa = r.pointee.ai_addr else { return nil }
+        return sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { sin in
+            withUnsafeBytes(of: sin.pointee.sin_addr) { IPv4Address(Data($0)) }
         }
     }
 
