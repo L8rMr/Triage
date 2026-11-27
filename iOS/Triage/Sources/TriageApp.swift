@@ -133,7 +133,7 @@ struct MainView: View {
         }
         .overlay(alignment: .top) {
             if link.reconnecting {
-                Label("Reconnecting to \(link.macName)…", systemImage: "arrow.triangle.2.circlepath")
+                Label(link.step.isEmpty ? "Reconnecting to \(link.macName)…" : "Reconnecting · \(link.step)", systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
