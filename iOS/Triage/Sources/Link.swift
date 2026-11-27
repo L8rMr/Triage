@@ -133,7 +133,7 @@ final class MacLink: ObservableObject {
         let parts = h.split(separator: ":")
         let port = parts.count == 2 ? UInt16(parts[1]) ?? 52384 : 52384
         let name = String(parts.first ?? Substring(h))
-        return .hostPort(host: NWEndpoint.Host(name), port: NWEndpoint.Port(rawValue: port)!)
+        return .hostPort(host: Resolve.routable(name), port: NWEndpoint.Port(rawValue: port)!)
     }
 
     func connect(host: String) {
@@ -200,7 +200,7 @@ final class MacLink: ObservableObject {
             open()
         case .direct(let mac):
             guard let h = mac.publicHost, let pt = mac.publicPort, let port = NWEndpoint.Port(rawValue: UInt16(pt)) else { next(); return }
-            target = FoundMac(id: mac.name, endpoint: .hostPort(host: NWEndpoint.Host(h), port: port), quic: true, localPort: nil)
+            target = FoundMac(id: mac.name, endpoint: .hostPort(host: Resolve.routable(h), port: port), quic: true, localPort: nil)
             open()
         case .p2p(let mac):
             let g = gen
@@ -267,7 +267,7 @@ final class MacLink: ObservableObject {
         // Away from home, go out on the phone's real network (cellular or Wi-Fi), not through a VPN tunnel: work VPNs
         // carry the traffic to a corporate network that won't pass it to a home Mac. If the VPN insists on carrying
         // everything, iOS keeps it in the tunnel anyway.
-        if label != "Wi-Fi", let i = PathWatch.shared.physical { params.requiredInterface = i }
+        if label != "Wi-Fi", PathWatch.shared.vpn, let i = PathWatch.shared.physical { params.requiredInterface = i }
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
         if !plan.isEmpty {

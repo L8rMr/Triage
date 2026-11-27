@@ -151,7 +151,6 @@ enum Stun {
             let params = NWParameters.udp
             params.allowLocalEndpointReuse = true
             params.preferNoProxies = true
-            if let i = PathWatch.shared.physical { params.requiredInterface = i }   // see what the internet sees of us, not of a VPN
             // Ask over IPv4 on purpose (the Mac's address is IPv4): on IPv6-only carriers the phone still gets the
             // carrier's IPv4 mapping this way, through NAT64.
             let target: NWEndpoint.Host = ipv4(host).map { .ipv4($0) } ?? NWEndpoint.Host(host)
@@ -222,6 +221,8 @@ final class PathWatch {
     private(set) var onWiFi = true
     /// The real network under any VPN (Wi-Fi or cellular). Internet routes to the Mac use it directly.
     private(set) var physical: NWInterface?
+    /// A VPN tunnel is carrying traffic (work VPNs, for example).
+    private(set) var vpn = false
     var changed: (() -> Void)?
 
     private init() {
@@ -229,6 +230,7 @@ final class PathWatch {
             guard let self else { return }
             let wifi = p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet)
             let real = p.availableInterfaces.filter { [.wifi, .wiredEthernet, .cellular].contains($0.type) }
+            self.vpn = p.availableInterfaces.contains { $0.type == .other && ($0.name.hasPrefix("utun") || $0.name.hasPrefix("ipsec")) }
             self.physical = real.first { $0.type != .cellular && wifi } ?? real.first { $0.type == .cellular } ?? real.first
             let was = self.onWiFi
             self.onWiFi = wifi
@@ -244,5 +246,36 @@ enum CloudSave {
     static func one(_ rec: CKRecord, in db: CKDatabase) async throws {
         let r = try await db.modifyRecords(saving: [rec], deleting: [], savePolicy: .allKeys)
         if case .failure(let e)? = r.saveResults[rec.recordID] { throw e }
+    }
+}
+
+
+// MARK: The Mac's address in the form this network can route
+
+enum Resolve {
+    /// On IPv6-only carriers (T-Mobile and others) an IPv4 address only works through the phone's IPv4 translator,
+    /// which a direct (non-VPN) route can't use. getaddrinfo turns the IPv4 address into the carrier's NAT64 IPv6
+    /// form when the network needs it; on normal networks it hands the IPv4 back unchanged.
+    static func routable(_ host: String) -> NWEndpoint.Host {
+        var hints = addrinfo(ai_flags: AI_DEFAULT, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM, ai_protocol: 0,
+                             ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &res) == 0, let first = res else { return NWEndpoint.Host(host) }
+        defer { freeaddrinfo(res) }
+        var v6: IPv6Address?, v4: IPv4Address?
+        var p: UnsafeMutablePointer<addrinfo>? = first
+        while let cur = p {
+            if let sa = cur.pointee.ai_addr {
+                if sa.pointee.sa_family == sa_family_t(AF_INET6), v6 == nil {
+                    v6 = sa.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { s in withUnsafeBytes(of: s.pointee.sin6_addr) { IPv6Address(Data($0)) } }
+                } else if sa.pointee.sa_family == sa_family_t(AF_INET), v4 == nil {
+                    v4 = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { s in withUnsafeBytes(of: s.pointee.sin_addr) { IPv4Address(Data($0)) } }
+                }
+            }
+            p = cur.pointee.ai_next
+        }
+        if let v6 { return .ipv6(v6) }
+        if let v4 { return .ipv4(v4) }
+        return NWEndpoint.Host(host)
     }
 }

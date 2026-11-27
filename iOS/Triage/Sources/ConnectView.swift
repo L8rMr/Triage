@@ -111,7 +111,7 @@ struct ConnectView: View {
                     Text(cloud.status).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
-            if !link.notes.isEmpty, case .failed = link.phase {
+            if !link.notes.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("What happened").font(.caption.weight(.bold)).foregroundStyle(.secondary)
                     ForEach(link.notes, id: \.self) { Text("• " + $0).font(.caption).foregroundStyle(.secondary) }
