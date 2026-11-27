@@ -264,6 +264,10 @@ final class MacLink: ObservableObject {
         // Straight to the Mac: never through iCloud Private Relay or another proxy. Relays open the connection but
         // stall the conversation, and the link is end-to-end encrypted anyway.
         params.preferNoProxies = true
+        // Away from home, go out on the phone's real network (cellular or Wi-Fi), not through a VPN tunnel: work VPNs
+        // carry the traffic to a corporate network that won't pass it to a home Mac. If the VPN insists on carrying
+        // everything, iOS keeps it in the tunnel anyway.
+        if label != "Wi-Fi", let i = PathWatch.shared.physical { params.requiredInterface = i }
         let c = NWConnection(to: target.endpoint, using: params)
         // Quick fail: a way in that hasn't said hello in a few seconds isn't the one; move on.
         if !plan.isEmpty {

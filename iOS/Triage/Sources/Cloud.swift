@@ -151,6 +151,7 @@ enum Stun {
             let params = NWParameters.udp
             params.allowLocalEndpointReuse = true
             params.preferNoProxies = true
+            if let i = PathWatch.shared.physical { params.requiredInterface = i }   // see what the internet sees of us, not of a VPN
             // Ask over IPv4 on purpose (the Mac's address is IPv4): on IPv6-only carriers the phone still gets the
             // carrier's IPv4 mapping this way, through NAT64.
             let target: NWEndpoint.Host = ipv4(host).map { .ipv4($0) } ?? NWEndpoint.Host(host)
@@ -219,12 +220,16 @@ final class PathWatch {
     static let shared = PathWatch()
     private let monitor = NWPathMonitor()
     private(set) var onWiFi = true
+    /// The real network under any VPN (Wi-Fi or cellular). Internet routes to the Mac use it directly.
+    private(set) var physical: NWInterface?
     var changed: (() -> Void)?
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] p in
             guard let self else { return }
             let wifi = p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet)
+            let real = p.availableInterfaces.filter { [.wifi, .wiredEthernet, .cellular].contains($0.type) }
+            self.physical = real.first { $0.type != .cellular && wifi } ?? real.first { $0.type == .cellular } ?? real.first
             let was = self.onWiFi
             self.onWiFi = wifi
             if was != wifi { DispatchQueue.main.async { self.changed?() } }
