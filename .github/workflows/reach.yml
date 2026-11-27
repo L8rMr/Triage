@@ -1,0 +1,38 @@
+name: Reach test
+on:
+  push:
+    paths: ['.github/workflows/reach.yml', '.github/check-reach']
+jobs:
+  reach:
+    runs-on: ubuntu-latest
+    steps:
+      - name: QUIC handshake to the Mac from the internet
+        run: |
+          pip install -q aioquic
+          python3 - <<'PY'
+          import asyncio, ssl, socket
+          from aioquic.asyncio import connect
+          from aioquic.quic.configuration import QuicConfiguration
+          HOST, PORT = "71.190.215.28", 52385
+          async def main():
+              cfg = QuicConfiguration(is_client=True, alpn_protocols=["triage"], verify_mode=ssl.CERT_NONE, idle_timeout=10)
+              try:
+                  async with connect(HOST, PORT, configuration=cfg, wait_connected=True) as c:
+                      print("QUIC HANDSHAKE OK, alpn:", c._quic.tls.alpn_negotiated)
+                      r, w = await c.create_stream()
+                      import json, struct
+                      msg = json.dumps({"t": "hello", "v": 1, "id": "probe", "name": "probe", "pub": "AA=="}).encode()
+                      w.write(struct.pack(">I", len(msg)) + msg)
+                      try:
+                          hdr = await asyncio.wait_for(r.readexactly(4), 5)
+                          n = struct.unpack(">I", hdr)[0]
+                          body = await asyncio.wait_for(r.readexactly(n), 5)
+                          print("MAC ANSWERED:", body[:200])
+                      except Exception as e:
+                          print("no app answer:", repr(e))
+              except Exception as e:
+                  print("QUIC FAILED:", repr(e))
+          asyncio.run(asyncio.wait_for(main(), 25))
+          PY
+      - name: TCP to the Wi-Fi port (should be closed)
+        run: timeout 5 bash -c 'echo > /dev/tcp/71.190.215.28/52384' && echo "TCP 52384 OPEN" || echo "TCP 52384 closed"
