@@ -45,11 +45,25 @@ final class CloudDirectory: ObservableObject {
                 await MainActor.run { status = "Sign in to iCloud to find your Macs anywhere" }
                 return
             }
-            let changes = try await db.recordZoneChanges(inZoneWith: CloudIDs.zone, since: nil)
+            var records: [CKRecord] = []
+            var notes: [String] = []
+            do {
+                let changes = try await db.recordZoneChanges(inZoneWith: CloudIDs.zone, since: nil)
+                for (_, result) in changes.modificationResultsByID {
+                    switch result {
+                    case .success(let mod): records.append(mod.record)
+                    case .failure(let e): notes.append(e.localizedDescription)
+                    }
+                }
+            } catch { notes.append(error.localizedDescription) }
+            // Belt and braces: ask for the Macs this phone already knows by name.
+            let have = Set(records.map(\.recordID.recordName))
+            let ids = Self.knownMacIDs.map { CKRecord.ID(recordName: "mac-\($0)", zoneID: CloudIDs.zone) }.filter { !have.contains($0.recordName) }
+            if !ids.isEmpty, let got = try? await db.records(for: ids) {
+                for (_, r) in got { if case .success(let rec) = r { records.append(rec) } }
+            }
             var found: [CloudMac] = []
-            for (_, result) in changes.modificationResultsByID {
-                guard case .success(let mod) = result else { continue }
-                let r = mod.record
+            for r in records {
                 guard r.recordType == "TriageMac", let id = r["macID"] as? String, let secret = r["secret"] as? Data else { continue }
                 found.append(CloudMac(id: id, name: r["name"] as? String ?? "Mac", secret: secret, lan: r["lan"] as? [String] ?? [],
                                       tailscale: r["tailscale"] as? String, publicHost: r["publicHost"] as? String,
@@ -58,8 +72,11 @@ final class CloudDirectory: ObservableObject {
                 Keychain.set(secret, for: "cloud-\(id)")
             }
             found.sort { $0.seen > $1.seen }
-            UserDefaults.standard.set(found.map(\.id), forKey: "cloud.macIDs")
-            await MainActor.run { macs = found; status = found.isEmpty ? "No Macs in your iCloud yet" : "" }
+            if !found.isEmpty { UserDefaults.standard.set(found.map(\.id), forKey: "cloud.macIDs") }
+            let why = found.isEmpty
+                ? "No Mac in this iPhone's iCloud (\(records.count) record\(records.count == 1 ? "" : "s") found\(notes.first.map { " · " + $0 } ?? "")). Is the Mac signed into the same Apple Account?"
+                : ""
+            await MainActor.run { macs = found; status = why }
         } catch {
             await MainActor.run { status = "iCloud: \(error.localizedDescription)" }
         }

@@ -39,8 +39,11 @@ struct ConnectView: View {
         .animation(.snappy, value: link.phase)
     }
 
+    /// Bonjour can remember a Mac after you've left the Wi-Fi: only list it while actually on Wi-Fi.
+    private var lanMacs: [FoundMac] { PathWatch.shared.onWiFi ? browser.macs : [] }
+
     /// In iCloud but not on this Wi-Fi.
-    private var awayMacs: [CloudMac] { cloud.macs.filter { m in !browser.macs.contains { $0.id == m.name } } }
+    private var awayMacs: [CloudMac] { cloud.macs.filter { m in !lanMacs.contains { $0.id == m.name } } }
 
     private var isConnecting: Bool {
         if case .connecting = link.phase { return true }
@@ -53,7 +56,7 @@ struct ConnectView: View {
         case .connecting(let n): return "Connecting to \(n)"
         case .needsCode: return "Type the code on your Mac"
         case .failed: return "Lost the pulse"
-        default: return browser.macs.isEmpty && awayMacs.isEmpty ? "Looking for your Mac" : "Pick your Mac"
+        default: return lanMacs.isEmpty && awayMacs.isEmpty ? "Looking for your Mac" : "Pick your Mac"
         }
     }
 
@@ -64,7 +67,7 @@ struct ConnectView: View {
 
         default:
             if !awayMacs.isEmpty { return "Your Macs, here on Wi-Fi or anywhere through iCloud." }
-            return browser.macs.isEmpty
+            return lanMacs.isEmpty
                 ? "Open Triage on your Mac and turn on Settings › iPhone. Same Wi-Fi, or the same iCloud account from anywhere."
                 : "Macs on this Wi-Fi running Triage."
         }
@@ -72,7 +75,7 @@ struct ConnectView: View {
 
     private var macList: some View {
         VStack(spacing: 12) {
-            ForEach(browser.macs) { mac in
+            ForEach(lanMacs) { mac in
                 Button { link.connect(mac) } label: {
                     Card {
                         HStack(spacing: 14) {
@@ -91,7 +94,7 @@ struct ConnectView: View {
                 .buttonStyle(.plain)
             }
             ForEach(awayMacs) { mac in
-                Button { link.connect(anywhere: mac, lan: browser.macs) } label: {
+                Button { link.connect(anywhere: mac, lan: lanMacs) } label: {
                     Card {
                         HStack(spacing: 14) {
                             Image(systemName: "icloud").font(.title2).foregroundStyle(Color.phosphor)
@@ -109,7 +112,7 @@ struct ConnectView: View {
                 }
                 .buttonStyle(.plain)
             }
-            if browser.macs.isEmpty && awayMacs.isEmpty {
+            if lanMacs.isEmpty && awayMacs.isEmpty {
                 ProgressView().padding(.top, 8)
                 Text(cloud.status.isEmpty ? (PathWatch.shared.onWiFi ? "Looking on this Wi-Fi and asking iCloud where your Mac is…" : "Asking iCloud where your Mac is…") : cloud.status)
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)

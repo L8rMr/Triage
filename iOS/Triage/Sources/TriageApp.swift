@@ -39,13 +39,23 @@ struct TriageRemoteApp: App {
                 }
             }
             .onChange(of: theme.activeID) { _, _ in WidgetFeed.shared.themeChanged() }
+            // iCloud answered late (or the Mac just showed up there): go find it
+            .onChange(of: cloud.macs.count) { _, n in if n > 0 { fallBackToHost() } }
+            // Nothing found yet: keep asking iCloud every 10 seconds while the connect screen is up
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(10))
+                    if link.phase != .ready && cloud.macs.isEmpty { await cloud.refresh() }
+                }
+            }
             // Paired before? Walk straight back in as soon as Bonjour sees that Mac.
             .onChange(of: browser.macs) { _, macs in
                 // Already in over the internet and now home: hop onto Wi-Fi.
                 if link.phase == .ready, link.viaInternet, let mac = macs.first(where: { $0.id == link.macName }) {
                     link.upgrade(to: mac); return
                 }
-                guard link.phase == .idle, let want = link.rememberedMac, let mac = macs.first(where: { $0.id == want }) else { return }
+                // Bonjour can hold on to a Mac it saw on Wi-Fi after you've left; only walk in when actually on Wi-Fi
+                guard link.phase == .idle, PathWatch.shared.onWiFi, let want = link.rememberedMac, let mac = macs.first(where: { $0.id == want }) else { return }
                 link.connect(mac)
             }
         }
@@ -58,7 +68,7 @@ extension TriageRemoteApp {
     func fallBackToHost() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             guard link.phase == .idle || { if case .failed = link.phase { return true }; return false }() else { return }
-            if let want = link.rememberedMac, browser.macs.contains(where: { $0.id == want }) { return }
+            if PathWatch.shared.onWiFi, let want = link.rememberedMac, browser.macs.contains(where: { $0.id == want }) { return }
             let mine = cloud.macs.first { $0.name == link.rememberedMac } ?? (cloud.macs.count == 1 ? cloud.macs.first : nil)
             if let mine { link.connect(anywhere: mine, lan: browser.macs) }
         }

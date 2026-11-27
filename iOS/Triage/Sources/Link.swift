@@ -150,7 +150,7 @@ final class MacLink: ObservableObject {
     func connect(_ mac: FoundMac) {
         // Bonjour first; if it's also in iCloud, a dropped Wi-Fi can fall through to the internet.
         let cloud = CloudDirectory.shared.macs.first { $0.name == mac.id }
-        start([.lan(mac)] + (cloud.map { Self.plan(for: $0, lan: []) } ?? []), cloud: cloud)
+        start((PathWatch.shared.onWiFi ? [.lan(mac)] : []) + (cloud.map { Self.plan(for: $0, lan: []) } ?? []), cloud: cloud)
     }
 
     /// From anywhere: this Wi-Fi, the Mac's own Wi-Fi addresses, then straight across the internet.
@@ -160,7 +160,7 @@ final class MacLink: ObservableObject {
 
     static func plan(for mac: CloudMac, lan: [FoundMac]) -> [Route] {
         var p: [Route] = []
-        if let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
+        if PathWatch.shared.onWiFi, let m = lan.first(where: { $0.id == mac.name }) { p.append(.lan(m)) }
         if PathWatch.shared.onWiFi { p += mac.lan.prefix(2).map { .address("\($0):\(mac.port)", "Wi-Fi") } }
         // Away: the router's TCP door first (gets through every carrier and relay), then QUIC, then a knock.
         if let h = mac.publicHost, let t = mac.tcpPort { p.append(.address("\(h):\(t)", "Internet (router door)")) }

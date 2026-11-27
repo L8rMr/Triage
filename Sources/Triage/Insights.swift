@@ -294,7 +294,7 @@ struct GlanceDashboard: View {
         for s in log.samples where s.t >= since {
             guard let t = s.top, !t.isEmpty else { continue }
             all += 1
-            if MacFacts.isSystem(t) { system += 1 } else { counts[t, default: 0] += 1 }
+            if MacFacts.isSystem(t) { system += 1 } else { counts[t == "VitalOS" ? "Triage" : t, default: 0] += 1 }   // the app's old name
         }
         let ranked = counts.sorted { $0.value > $1.value }.prefix(4).map { Hungry(name: $0.key, count: $0.value) }
         let total = max(all, 1)
