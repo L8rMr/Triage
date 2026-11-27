@@ -272,13 +272,19 @@ enum RemoteInput {
     private static var cursor: CGPoint { CGEvent(source: nil)?.location ?? .zero }
 
     private static func clamp(_ p: CGPoint) -> CGPoint {
-        // keep the pointer on any connected screen, not just the one being shown
-        var all = CGRect.null
-        var ids = [CGDirectDisplayID](repeating: 0, count: 8); var n: UInt32 = 0
-        CGGetActiveDisplayList(8, &ids, &n)
-        for i in 0..<Int(n) { all = all.union(CGDisplayBounds(ids[i])) }
-        if all.isNull { all = display }
-        return CGPoint(x: min(max(p.x, all.minX), all.maxX - 1), y: min(max(p.y, all.minY), all.maxY - 1))
+        // keep the pointer on the screen the phone is showing, so it never wanders off where you can't see it
+        let d = display
+        return CGPoint(x: min(max(p.x, d.minX), d.maxX - 1), y: min(max(p.y, d.minY), d.maxY - 1))
+    }
+
+    /// Bring the pointer onto the screen being shown (middle of it) if it's on another one.
+    static func bringPointerHome() {
+        q.async {
+            let d = display
+            guard !d.contains(cursor) else { return }
+            CGWarpMouseCursorPosition(CGPoint(x: d.midX, y: d.midY))
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
     }
 
     private static func flags(_ e: [String: Any]) -> CGEventFlags {
@@ -443,6 +449,7 @@ extension RemoteAPI {
                                                        quality: CGFloat(a["quality"] as? Double ?? 0.55),
                                                        codec: a["codec"] as? String ?? "jpeg", bitrate: a["bitrate"] as? Int ?? 6_000_000)
                     RemoteServer.shared.startWatching(s)
+                    RemoteInput.bringPointerHome()
                     let b = CGDisplayBounds(ScreenShare.shared.displayID)
                     done(.success(["display": Int(ScreenShare.shared.displayID), "w": b.width, "h": b.height, "codec": ScreenShare.shared.codecName,
                                    "input": RemoteInput.trusted]))

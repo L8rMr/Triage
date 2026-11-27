@@ -11,6 +11,7 @@ struct SettingsScreen: View {
     @AppStorage("remote.mode") private var pointer = "trackpad"
     @AppStorage("remote.clipAuto") private var clipAuto = true
     @AppStorage("remote.fingers") private var fingers = 3
+    @AppStorage("remote.keyClicks") private var keyClicks = true
     @State private var confirmForget = false
     @State private var note: String?
 
@@ -104,6 +105,7 @@ struct SettingsScreen: View {
                 Text("Trackpad speed")
                 Slider(value: $sensitivity, in: 0.6...3.2) { Text("Speed") } minimumValueLabel: { Image(systemName: "tortoise") } maximumValueLabel: { Image(systemName: "hare") }
             }
+            Toggle("Key clicks on the Mac keyboard", isOn: $keyClicks)
             Picker("Swipe gestures", selection: $fingers) {
                 Text("3 fingers, like a Mac").tag(3)
                 Text("4 fingers (iOS Zoom on)").tag(4)

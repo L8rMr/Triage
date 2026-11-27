@@ -188,6 +188,7 @@ struct RemoteScreen: View {
     @State private var noInput = false
     @State private var displays: [[String: Any]] = []
     @State private var display: Int?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var mods: Set<String> = []
     @State private var locked: Set<String> = []
     @State private var typing = false
@@ -252,6 +253,12 @@ struct RemoteScreen: View {
         .sheet(isPresented: $sharing) { ShareSheet(items: shareShot) }
         .task { await start() }
         .onDisappear { stop() }
+        // Back from the background, or the link came back on a new road: the Mac's stream ended with the old
+        // connection, so start a fresh one instead of showing a black screen.
+        .onChange(of: scenePhase) { _, p in
+            if p == .active { Task { try? await Task.sleep(for: .milliseconds(700)); if link.phase == .ready { await start() } } }
+        }
+        .onChange(of: link.session) { _, _ in Task { await start() } }
         .onChange(of: frames.ended) { _, e in if e { exit() } }
         .persistentSystemOverlays(.hidden)
     }

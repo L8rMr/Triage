@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AudioToolbox
 
 /// A MacBook keyboard, drawn key for key: esc + F-row, number row, ⇥ QWERTY, ⇪ ASDF, ⇧ ZXCV, fn ⌃ ⌥ ⌘ space ⌘ ⌥ and the inverted-T arrows.
 /// Modifiers work like the Mac's Sticky Keys: tap once for the next key, tap twice to lock.
@@ -43,6 +44,19 @@ struct MacKeyboard: View {
     }
 
     private var shifted: Bool { mods.contains("shift") || locked.contains("shift") }
+    @State private var echo: [String] = []          // the last keys that went to the Mac, so every press is confirmed
+    @State private var echoAt = Date.distantPast
+
+    private func sent(_ key: String, _ m: [String]) {
+        let marks = [("ctrl", "⌃"), ("opt", "⌥"), ("shift", "⇧"), ("cmd", "⌘")].filter { m.contains($0.0) }.map(\.1).joined()
+        let names = ["delete": "⌫", "return": "↩", "tab": "⇥", "space": "␣", "escape": "esc", "left": "←", "right": "→", "up": "↑", "down": "↓"]
+        var face = names[key] ?? key
+        if face.count == 1, m.contains("shift") { face = face.uppercased() }
+        echo = Array((echo + [marks + face]).suffix(14))
+        echoAt = Date()
+        let at = echoAt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { if echoAt == at { withAnimation(.easeOut(duration: 0.3)) { echo = [] } } }
+    }
 
     var body: some View {
         GeometryReader { g in
@@ -61,6 +75,19 @@ struct MacKeyboard: View {
                 bottomRow(width: w, h: h)
             }
             .frame(width: w, height: g.size.height, alignment: .bottom)
+        }
+        .overlay(alignment: .topTrailing) {
+            if !echo.isEmpty {
+                Text(echo.joined(separator: " "))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.phosphor)
+                    .lineLimit(1).truncationMode(.head)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.black.opacity(0.65), in: Capsule())
+                    .offset(y: -30)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -94,7 +121,7 @@ struct MacKeyboard: View {
     private func modKey(_ mod: String, _ label: String, _ symbol: String, width: CGFloat, h: CGFloat) -> some View {
         let on = mods.contains(mod), lock = locked.contains(mod)
         return Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            KeyFeel.modifier()
             if lock { locked.remove(mod); mods.remove(mod) }
             else if on { mods.remove(mod); locked.insert(mod) }       // second tap locks it
             else { mods.insert(mod) }
@@ -113,7 +140,7 @@ struct MacKeyboard: View {
         if let mod = k.mod {
             let on = mods.contains(mod), lock = locked.contains(mod)
             Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                KeyFeel.modifier()
                 if lock { locked.remove(mod); mods.remove(mod) } else if on { mods.remove(mod); locked.insert(mod) } else { mods.insert(mod) }
             } label: {
                 Text("⇧ " + k.label).font(.system(size: max(8, h * 0.24))).lineLimit(1).minimumScaleFactor(0.6).frame(width: unit * k.width, height: h)
@@ -122,7 +149,7 @@ struct MacKeyboard: View {
         } else if k.key == "caps" {
             let lock = locked.contains("shift")
             Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                KeyFeel.modifier()
                 if lock { locked.remove("shift") } else { locked.insert("shift") }
             } label: {
                 HStack {
@@ -133,9 +160,10 @@ struct MacKeyboard: View {
             }
             .buttonStyle(KeyStyle(active: false, locked: false))
         } else {
-            RepeatKey(repeats: ["delete", "left", "right", "up", "down", "space"].contains(k.key)) {
+            RepeatKey(repeats: ["delete", "left", "right", "up", "down", "space"].contains(k.key), sound: k.key == "delete" ? 1155 : (k.small ? 1156 : 1104)) {
                 let m = Array(mods.union(locked))
                 press(k.key, m)
+                sent(k.key, m)
                 if !mods.isEmpty { mods = [] }
             } label: {
                 Group {
@@ -163,40 +191,75 @@ struct MacKeyboard: View {
     }
 }
 
+/// What a key press feels like: a firm tap going down, a softer one coming up, and the iPhone keyboard's own click
+/// (it follows the ring/silent switch; Settings › Remote › Key clicks turns it off).
+enum KeyFeel {
+    private static let downGen = UIImpactFeedbackGenerator(style: .rigid)
+    private static let upGen = UIImpactFeedbackGenerator(style: .soft)
+    private static let tickGen = UISelectionFeedbackGenerator()
+    static var clicks: Bool { UserDefaults.standard.object(forKey: "remote.keyClicks") as? Bool ?? true }
+
+    static func prepare() { downGen.prepare(); upGen.prepare(); tickGen.prepare() }
+    static func down(sound: SystemSoundID = 1104) {
+        downGen.impactOccurred(intensity: 0.9); downGen.prepare()
+        if clicks { AudioServicesPlaySystemSound(sound) }
+    }
+    static func up() { upGen.impactOccurred(intensity: 0.45); upGen.prepare() }
+    static func repeatTick() { tickGen.selectionChanged(); tickGen.prepare() }
+    static func modifier() {
+        downGen.impactOccurred(intensity: 0.7); downGen.prepare()
+        if clicks { AudioServicesPlaySystemSound(1156) }
+    }
+}
+
 /// Fires on touch-down (feels instant) and repeats while held for delete, arrows and space.
+/// Even the quickest tap lights the key and pops it up for a moment, so you always see what you hit.
 private struct RepeatKey<Label: View>: View {
     let repeats: Bool
+    var sound: SystemSoundID = 1104
     let action: () -> Void
     @ViewBuilder let label: Label
     @State private var down = false
+    @State private var lit = false
     @State private var timer: Timer?
 
     var body: some View {
         label
-            .foregroundStyle(.white)
-            .background(down ? Color.white.opacity(0.32) : Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .foregroundStyle(lit ? Color.black : .white)
+            .background(lit ? Color.phosphor : Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .scaleEffect(lit ? 0.93 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.6), value: lit)
             .overlay(alignment: .top) {
-                if down && !repeats {      // the little pop-up like iOS, so you see what you hit
-                    label.foregroundStyle(.white).scaleEffect(1.25)
-                        .background(Color(white: 0.3), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .offset(y: -40).allowsHitTesting(false)
+                if lit && !repeats {      // the pop-up like iOS, so you see what you hit
+                    label.foregroundStyle(.black).scaleEffect(1.35)
+                        .background(Color.phosphor, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                        .offset(y: -44).allowsHitTesting(false)
+                        .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
                 }
             }
             .contentShape(Rectangle())
+            .onAppear { KeyFeel.prepare() }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
                         guard !down else { return }
                         down = true
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
+                        lit = true
+                        KeyFeel.down(sound: sound)
                         action()
                         if repeats {
                             timer = Timer.scheduledTimer(withTimeInterval: 0.42, repeats: false) { _ in
-                                timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { _ in action() }
+                                timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { _ in action(); KeyFeel.repeatTick() }
                             }
                         }
                     }
-                    .onEnded { _ in down = false; timer?.invalidate(); timer = nil }
+                    .onEnded { _ in
+                        down = false; timer?.invalidate(); timer = nil
+                        KeyFeel.up()
+                        // keep the light on long enough to be seen, even after a lightning-fast tap
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { if !down { lit = false } }
+                    }
             )
     }
 }

@@ -84,6 +84,8 @@ final class MacLink: ObservableObject {
     @Published private(set) var info: MacInfo?
     @Published private(set) var vitals: Vitals?
     @Published private(set) var reconnecting = false
+    /// Bumps every time a (re)connection is ready: screens that stream (the remote desktop) restart on it.
+    @Published private(set) var session = 0
     /// How we're talking right now: Wi-Fi, Tailscale, Internet (direct).
     @Published private(set) var route = ""
 
@@ -530,6 +532,7 @@ final class MacLink: ObservableObject {
                 self.mode = mode
                 self.phase = .ready
                 self.reconnecting = false
+                self.session += 1
                 if case .service = self.target?.endpoint { self.rememberedMac = name }
             }
             Task { _ = try? await self.call("subscribe", ["vitals": true]) }
